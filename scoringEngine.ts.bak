@@ -1,0 +1,175 @@
+// scoringEngine.ts
+//
+// PURPOSE:
+// Replaces "let Gemini invent sectionScores" with deterministic, code-based
+// calculations. Gemini still extracts skills/keywords as structured data
+// (that part is fine and useful), but the NUMBERS that feed the final ATS
+// score are computed here in plain TypeScript — same inputs will ALWAYS
+// produce the same outputs.
+//
+// WHERE THIS PLUGS IN:
+// server.ts still calls Gemini to get: skillsFound, missingSkills,
+// summary, strengths, weaknesses, grammarSuggestions, improvementTips,
+// recommendedCertifications, recommendedProjects, suitableJobRoles.
+// Those are fine to be LLM-generated — they're advisory/explanatory text,
+// not the score.
+//
+// But instead of trusting Gemini's sectionScores.keywords /
+// .formatting / .experienceImpact / .skillsMatch / .readability,
+// server.ts should call computeSectionScores() below with the raw
+// resumeText + jobDescription + Gemini's extracted skill lists, and use
+// THAT result to calculate the final ATS score.
+
+export interface SectionScores {
+  formatting: number;
+  keywords: number;
+  experienceImpact: number;
+  skillsMatch: number;
+  readability: number;
+}
+
+export interface ScoringInput {
+  resumeText: string;
+  jobDescription: string;
+  skillsFound: string[];
+}
+
+function normalize(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s+.#-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tokenize(text: string): string[] {
+  return normalize(text).split(' ').filter(Boolean);
+}
+
+const STOPWORDS = new Set([
+  'the','a','an','and','or','but','with','for','to','of','in','on','at',
+  'is','are','be','as','by','this','that','will','you','your','we','our',
+  'have','has','from','it','role','job','looking','candidate','strong',
+  'experience','years','work','working','team','ability','skills'
+]);
+
+function extractJDKeywords(jobDescription: string): string[] {
+  const tokens = tokenize(jobDescription).filter(
+    (t) => t.length > 2 && !STOPWORDS.has(t)
+  );
+  return Array.from(new Set(tokens));
+}
+
+function calculateKeywordScore(resumeText: string, jobDescription: string): number {
+  if (!jobDescription || jobDescription.trim().length === 0) {
+    return 50;
+  }
+  const jdKeywords = extractJDKeywords(jobDescription);
+  if (jdKeywords.length === 0) return 50;
+
+  const resumeNormalized = normalize(resumeText);
+  let matched = 0;
+  for (const kw of jdKeywords) {
+    if (resumeNormalized.includes(kw)) matched++;
+  }
+  const ratio = matched / jdKeywords.length;
+  return Math.round(Math.min(100, ratio * 100));
+}
+
+function calculateSkillsMatchScore(skillsFound: string[], jobDescription: string): number {
+  if (!jobDescription || skillsFound.length === 0) return 50;
+  const jdNormalized = normalize(jobDescription);
+  let matched = 0;
+  for (const skill of skillsFound) {
+    if (jdNormalized.includes(normalize(skill))) matched++;
+  }
+  const ratio = matched / skillsFound.length;
+  return Math.round(Math.min(100, ratio * 100));
+}
+
+function calculateFormattingScore(resumeText: string): number {
+  let score = 100;
+  const text = resumeText;
+
+  const hasEmail = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(text);
+  if (!hasEmail) score -= 15;
+
+  const hasPhone = /(\+?\d[\d\s-]{8,}\d)/.test(text);
+  if (!hasPhone) score -= 10;
+
+  const commonSections = ['experience', 'education', 'skills', 'projects'];
+  const lower = text.toLowerCase();
+  const sectionsFound = commonSections.filter((s) => lower.includes(s)).length;
+  score -= (commonSections.length - sectionsFound) * 8;
+
+  const bulletCount = (text.match(/(^|\n)\s*[•\-*]\s+/g) || []).length;
+  if (bulletCount < 3) score -= 10;
+
+  const wordCount = tokenize(text).length;
+  if (wordCount < 150) score -= 15;
+  if (wordCount > 1200) score -= 10;
+
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+function countSyllables(word: string): number {
+  word = word.toLowerCase().replace(/[^a-z]/g, '');
+  if (word.length <= 3) return 1;
+  const matches = word.match(/[aeiouy]{1,2}/g);
+  return matches ? matches.length : 1;
+}
+
+function calculateReadabilityScore(resumeText: string): number {
+  const sentences = resumeText.split(/[.!?]+/).filter((s) => s.trim().length > 0);
+  const words = tokenize(resumeText);
+  if (sentences.length === 0 || words.length === 0) return 50;
+
+  const avgWordsPerSentence = words.length / sentences.length;
+  const totalSyllables = words.reduce((sum, w) => sum + countSyllables(w), 0);
+  const avgSyllablesPerWord = totalSyllables / words.length;
+
+  const flesch =
+    206.835 - 1.015 * avgWordsPerSentence - 84.6 * avgSyllablesPerWord;
+
+  const clamped = Math.max(0, Math.min(100, flesch));
+  return Math.round(clamped);
+}
+
+const ACTION_VERBS = [
+  'led','built','created','designed','developed','implemented','improved',
+  'increased','decreased','reduced','optimized','launched','managed',
+  'architected','automated','delivered','achieved','drove','scaled',
+  'spearheaded','streamlined'
+];
+
+function calculateExperienceImpactScore(resumeText: string): number {
+  const lower = resumeText.toLowerCase();
+
+  const quantifiers = (resumeText.match(/\d+%|\$\d+|\d+x\b|\d{2,}/g) || []).length;
+  const quantScore = Math.min(50, quantifiers * 6);
+
+  const verbHits = ACTION_VERBS.filter((v) => lower.includes(v)).length;
+  const verbScore = Math.min(50, verbHits * 6);
+
+  return Math.round(Math.min(100, quantScore + verbScore));
+}
+
+export function computeSectionScores(input: ScoringInput): SectionScores {
+  return {
+    formatting: calculateFormattingScore(input.resumeText),
+    keywords: calculateKeywordScore(input.resumeText, input.jobDescription),
+    experienceImpact: calculateExperienceImpactScore(input.resumeText),
+    skillsMatch: calculateSkillsMatchScore(input.skillsFound, input.jobDescription),
+    readability: calculateReadabilityScore(input.resumeText),
+  };
+}
+
+export function calculateFinalATS(scores: SectionScores): number {
+  return Math.round(
+    scores.keywords * 0.3 +
+      scores.formatting * 0.2 +
+      scores.experienceImpact * 0.2 +
+      scores.skillsMatch * 0.15 +
+      scores.readability * 0.15
+  );
+}

@@ -1,0 +1,140 @@
+import React, { useState, useEffect } from 'react';
+import { Navbar } from './components/Navbar';
+import { HeroSection } from './components/HeroSection';
+import { FileUploader } from './components/FileUploader';
+import { LoadingScreen } from './components/LoadingScreen';
+import { Dashboard } from './components/Dashboard';
+import { AnalysisResult } from './types';
+import { SAMPLE_RESUMES } from './data/sampleResumes';
+
+export default function App() {
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    return (
+      localStorage.getItem('theme') === 'dark' ||
+      (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)
+    );
+  });
+
+  const [targetRole, setTargetRole] = useState<string>('Full Stack Software Engineer');
+  const [jobDescription, setJobDescription] = useState<string>('');
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Apply dark class to <html> element
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    }
+  }, [darkMode]);
+
+  const handleToggleDarkMode = () => {
+    setDarkMode((prev) => !prev);
+  };
+
+  const handleAnalyzeResume = async (resumeText: string, fileName?: string) => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/analyze-resume', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          resumeText,
+          targetRole: targetRole.trim() || 'General Tech & Professional Role',
+          jobDescription,
+          fileName,
+        }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || 'Server error while analyzing resume.');
+      }
+
+      const data: AnalysisResult = await response.json();
+      setAnalysisResult(data);
+    } catch (err: unknown) {
+      console.error('Error analyzing resume:', err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'An unexpected error occurred during resume analysis. Please try again.'
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleLoadSample = (sampleId: string) => {
+    const sample = SAMPLE_RESUMES.find((s) => s.id === sampleId);
+    if (sample) {
+      setTargetRole(sample.role);
+      handleAnalyzeResume(sample.text, sample.fileName);
+    }
+  };
+
+  const handleReset = () => {
+    setAnalysisResult(null);
+    setError(null);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 transition-colors flex flex-col font-sans">
+      {/* Navbar Header */}
+      <Navbar
+        darkMode={darkMode}
+        onToggleDarkMode={handleToggleDarkMode}
+        onReset={handleReset}
+        hasAnalysis={!!analysisResult}
+        onLoadSample={handleLoadSample}
+      />
+
+      {/* Main Content Area */}
+      <main className="flex-1">
+        {!analysisResult && !isLoading && (
+          <div>
+            <HeroSection
+              targetRole={targetRole}
+              onTargetRoleChange={setTargetRole}
+              jobDescription={jobDescription}
+              onJobDescriptionChange={setJobDescription}
+            />
+
+            <FileUploader
+              onAnalyze={handleAnalyzeResume}
+              isLoading={isLoading}
+              error={error}
+            />
+          </div>
+        )}
+
+        {isLoading && <LoadingScreen targetRole={targetRole} />}
+
+        {analysisResult && !isLoading && (
+          <Dashboard
+            result={analysisResult}
+            onReset={handleReset}
+          />
+        )}
+      </main>
+
+      {/* Footer */}
+      <footer className="py-6 border-t border-slate-200 dark:border-slate-800 text-center text-xs text-slate-500 dark:text-slate-400">
+        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <p>© {new Date().getFullYear()} AI Resume Analyzer. Powered by Google Gemini AI.</p>
+          <p className="text-[11px] font-medium text-slate-400">
+            ATS Compatibility Screener • Career Guidance
+          </p>
+        </div>
+      </footer>
+    </div>
+  );
+}
