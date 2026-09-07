@@ -4,6 +4,7 @@ import { HeroSection } from './components/HeroSection';
 import { FileUploader } from './components/FileUploader';
 import { LoadingScreen } from './components/LoadingScreen';
 import { Dashboard } from './components/Dashboard';
+import { CoverLetterGenerator } from './components/CoverLetterGenerator';
 import { AnalysisResult } from './types';
 import { SAMPLE_RESUMES } from './data/sampleResumes';
 
@@ -14,6 +15,10 @@ export default function App() {
       (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)
     );
   });
+
+  const [activeView, setActiveView] = useState<'analyzer' | 'cover-letter'>('analyzer');
+  const [currentResumeText, setCurrentResumeText] = useState<string>('');
+  const [currentFileName, setCurrentFileName] = useState<string>('');
 
   const [targetRole, setTargetRole] = useState<string>('Full Stack Software Engineer');
   const [jobDescription, setJobDescription] = useState<string>('');
@@ -39,6 +44,8 @@ export default function App() {
   const handleAnalyzeResume = async (resumeText: string, fileName?: string) => {
     setIsLoading(true);
     setError(null);
+    setCurrentResumeText(resumeText);
+    if (fileName) setCurrentFileName(fileName);
 
     try {
       const response = await fetch('/api/analyze-resume', {
@@ -77,6 +84,8 @@ export default function App() {
     const sample = SAMPLE_RESUMES.find((s) => s.id === sampleId);
     if (sample) {
       setTargetRole(sample.role);
+      setCurrentResumeText(sample.text);
+      setCurrentFileName(sample.fileName);
       handleAnalyzeResume(sample.text, sample.fileName);
     }
   };
@@ -84,6 +93,7 @@ export default function App() {
   const handleReset = () => {
     setAnalysisResult(null);
     setError(null);
+    setActiveView('analyzer');
   };
 
   return (
@@ -95,34 +105,53 @@ export default function App() {
         onReset={handleReset}
         hasAnalysis={!!analysisResult}
         onLoadSample={handleLoadSample}
+        activeView={activeView}
+        onNavigateView={setActiveView}
       />
 
       {/* Main Content Area */}
       <main className="flex-1">
-        {!analysisResult && !isLoading && (
-          <div>
-            <HeroSection
-              targetRole={targetRole}
-              onTargetRoleChange={setTargetRole}
-              jobDescription={jobDescription}
-              onJobDescriptionChange={setJobDescription}
-            />
-
-            <FileUploader
-              onAnalyze={handleAnalyzeResume}
-              isLoading={isLoading}
-              error={error}
-            />
-          </div>
+        {/* Cover Letter Generator View */}
+        {activeView === 'cover-letter' && (
+          <CoverLetterGenerator
+            initialResumeText={currentResumeText}
+            initialTargetRole={targetRole}
+            initialJobDescription={jobDescription}
+            initialFileName={currentFileName}
+            onBackToAnalyzer={() => setActiveView('analyzer')}
+          />
         )}
 
-        {isLoading && <LoadingScreen targetRole={targetRole} />}
+        {/* Resume Analyzer View */}
+        {activeView === 'analyzer' && (
+          <>
+            {!analysisResult && !isLoading && (
+              <div>
+                <HeroSection
+                  targetRole={targetRole}
+                  onTargetRoleChange={setTargetRole}
+                  jobDescription={jobDescription}
+                  onJobDescriptionChange={setJobDescription}
+                />
 
-        {analysisResult && !isLoading && (
-          <Dashboard
-            result={analysisResult}
-            onReset={handleReset}
-          />
+                <FileUploader
+                  onAnalyze={handleAnalyzeResume}
+                  isLoading={isLoading}
+                  error={error}
+                />
+              </div>
+            )}
+
+            {isLoading && <LoadingScreen targetRole={targetRole} />}
+
+            {analysisResult && !isLoading && (
+              <Dashboard
+                result={analysisResult}
+                onReset={handleReset}
+                onWriteCoverLetter={() => setActiveView('cover-letter')}
+              />
+            )}
+          </>
         )}
       </main>
 

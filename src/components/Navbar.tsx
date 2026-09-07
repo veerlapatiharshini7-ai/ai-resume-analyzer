@@ -7,6 +7,8 @@ interface NavbarProps {
   onReset: () => void;
   hasAnalysis: boolean;
   onLoadSample: (id: string) => void;
+  activeView?: 'analyzer' | 'cover-letter';
+  onNavigateView?: (view: 'analyzer' | 'cover-letter') => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -15,14 +17,16 @@ export const Navbar: React.FC<NavbarProps> = ({
   onReset,
   hasAnalysis,
   onLoadSample,
+  activeView = 'analyzer',
+  onNavigateView,
 }) => {
   return (
     <header className="sticky top-0 z-50 backdrop-blur-md bg-white/80 dark:bg-slate-900/80 border-b border-slate-200 dark:border-slate-800 transition-colors">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2">
         {/* Brand Logo */}
         <div 
           onClick={onReset}
-          className="flex items-center gap-2.5 cursor-pointer group"
+          className="flex items-center gap-2.5 cursor-pointer group shrink-0"
         >
           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20 group-hover:scale-105 transition-transform">
             <FileText className="w-5 h-5" />
@@ -37,10 +41,42 @@ export const Navbar: React.FC<NavbarProps> = ({
               </span>
             </div>
             <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium -mt-1 hidden sm:block">
-              AI Resume & ATS Analyzer
+              AI Resume & Career Platform
             </p>
           </div>
         </div>
+
+        {/* Center Navigation Tabs */}
+        {onNavigateView && (
+          <nav className="hidden md:flex items-center gap-1 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl border border-slate-200 dark:border-slate-700/80">
+            <button
+              type="button"
+              id="nav-tab-analyzer"
+              onClick={() => onNavigateView('analyzer')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                activeView === 'analyzer'
+                  ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Resume Analyzer</span>
+            </button>
+            <button
+              type="button"
+              id="nav-tab-cover-letter"
+              onClick={() => onNavigateView('cover-letter')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                activeView === 'cover-letter'
+                  ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+              <span>Cover Letter Generator</span>
+            </button>
+          </nav>
+        )}
 
         {/* Action Controls */}
         <div className="flex items-center gap-2 sm:gap-3">
@@ -95,6 +131,30 @@ export const Navbar: React.FC<NavbarProps> = ({
               <RotateCcw className="w-4 h-4" />
               <span className="hidden sm:inline">Analyze Another</span>
               <span className="sm:hidden">New</span>
+            </button>
+          )}
+
+          {/* Mobile View Switcher */}
+          {onNavigateView && (
+            <button
+              type="button"
+              id="mobile-nav-toggle-btn"
+              onClick={() => onNavigateView(activeView === 'analyzer' ? 'cover-letter' : 'analyzer')}
+              className="md:hidden flex items-center gap-1 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-2.5 py-2 rounded-lg cursor-pointer transition-colors"
+            >
+              {activeView === 'analyzer' ? (
+                <>
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                  <span className="hidden xs:inline">Cover Letter</span>
+                  <span className="xs:hidden">Letter</span>
+                </>
+              ) : (
+                <>
+                  <FileText className="w-3.5 h-3.5 text-blue-500" />
+                  <span className="hidden xs:inline">Analyzer</span>
+                  <span className="xs:hidden">Resume</span>
+                </>
+              )}
             </button>
           )}
 
