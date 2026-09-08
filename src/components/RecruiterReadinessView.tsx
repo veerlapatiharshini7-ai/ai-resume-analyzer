@@ -17,6 +17,7 @@ import {
   HelpCircle,
   Info,
   Check,
+  BarChart2,
 } from 'lucide-react';
 
 interface RecruiterReadinessViewProps {
@@ -162,6 +163,161 @@ export const RecruiterReadinessView: React.FC<RecruiterReadinessViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* ─── NEW: Score Breakdown Section ─── */}
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+        {/* Section Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-700/60 gap-2 bg-slate-50/50 dark:bg-slate-900/40">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-blue-100 dark:bg-blue-950/60 flex items-center justify-center shrink-0">
+              <BarChart2 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 dark:text-white leading-tight">
+                Score Breakdown
+              </h2>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                How each category contributes to your overall score
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <span className="text-[11px] font-semibold px-2.5 py-1 rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+              Overall: {readiness.overallScore} / 100
+            </span>
+          </div>
+        </div>
+
+        {/* Formula Pill */}
+        <div className="px-6 py-3 border-b border-slate-100 dark:border-slate-700/60 bg-blue-50/30 dark:bg-blue-950/10">
+          <p className="text-[11px] font-mono text-blue-700 dark:text-blue-300 font-semibold">
+            Contribution = (Category Score × Weight%) ÷ 100 &nbsp;|&nbsp; Overall = Σ all contributions
+          </p>
+        </div>
+
+        {/* Breakdown Rows */}
+        <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
+          {readiness.categories.map((cat, idx) => {
+            // contribution = score × weight (weightedScore already holds this, rounded to 1dp)
+            const contribution = cat.weightedScore;
+            // contribution share of overall (visual bar width within the row)
+            const barPct = Math.max(0, Math.min(100, cat.score));
+            // Contribution bar width relative to its weight ceiling
+            const contributionBarPct = cat.weight > 0
+              ? Math.max(0, Math.min(100, Math.round((contribution / (cat.weight * 100)) * 100)))
+              : 0;
+
+            const getRowAccent = (status: 'Strong' | 'Moderate' | 'Needs Improvement') => {
+              if (status === 'Strong') return {
+                scoreBg: 'bg-emerald-50 dark:bg-emerald-950/30',
+                scoreText: 'text-emerald-700 dark:text-emerald-300',
+                bar: 'bg-emerald-500',
+                contribBar: 'bg-emerald-400/60',
+                badge: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60',
+              };
+              if (status === 'Moderate') return {
+                scoreBg: 'bg-blue-50 dark:bg-blue-950/30',
+                scoreText: 'text-blue-700 dark:text-blue-300',
+                bar: 'bg-blue-500',
+                contribBar: 'bg-blue-400/60',
+                badge: 'bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300 border-blue-200 dark:border-blue-800/60',
+              };
+              return {
+                scoreBg: 'bg-amber-50 dark:bg-amber-950/30',
+                scoreText: 'text-amber-700 dark:text-amber-300',
+                bar: 'bg-amber-500',
+                contribBar: 'bg-amber-400/60',
+                badge: 'bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border-amber-200 dark:border-amber-800/60',
+              };
+            };
+
+            const accent = getRowAccent(cat.status);
+
+            return (
+              <div
+                key={cat.id}
+                className="px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 hover:bg-slate-50/60 dark:hover:bg-slate-900/30 transition-colors"
+              >
+                {/* Rank */}
+                <div className="hidden sm:flex w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 items-center justify-center shrink-0 text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                  {idx + 1}
+                </div>
+
+                {/* Category Icon + Name + Weight */}
+                <div className="flex items-center gap-3 sm:w-52 shrink-0">
+                  <div className="w-8 h-8 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center shrink-0 shadow-xs">
+                    {getCategoryIcon(cat.id)}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-slate-900 dark:text-white leading-tight truncate">
+                      {cat.name}
+                    </p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                      Weight: {Math.round(cat.weight * 100)}%
+                    </p>
+                  </div>
+                </div>
+
+                {/* Score bar + value */}
+                <div className="flex-1 min-w-0 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 tracking-wide">
+                      Score
+                    </span>
+                    <span className={`text-xs font-black ${accent.scoreText} tabular-nums`}>
+                      {cat.score}&thinsp;<span className="font-semibold text-slate-400">/100</span>
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
+                    <div
+                      className={`${accent.bar} h-2 rounded-full transition-all duration-1000`}
+                      style={{ width: `${barPct}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* Contribution */}
+                <div className={`flex flex-col items-center justify-center px-3 py-1.5 rounded-xl border shrink-0 min-w-[90px] ${accent.scoreBg} border-slate-200/60 dark:border-slate-700`}>
+                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider leading-tight">
+                    Contribution
+                  </span>
+                  <span className={`text-base font-black ${accent.scoreText} leading-tight tabular-nums`}>
+                    +{contribution}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-medium leading-tight">pts</span>
+                </div>
+
+                {/* Status Badge */}
+                <div className="shrink-0">
+                  {getStatusBadge(cat.status)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Total Row */}
+        <div className="px-4 sm:px-6 py-3 bg-slate-900 dark:bg-slate-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-b-2xl">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+              Overall Recruiter Readiness Score
+            </span>
+            <span className="text-[10px] px-2 py-0.5 rounded bg-slate-700 text-slate-400 font-mono">
+              Σ contributions
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-lg font-black text-white tabular-nums">
+              {readiness.overallScore}
+            </span>
+            <span className="text-sm text-slate-400 font-bold">/ 100</span>
+            <span className={`ml-2 text-[10px] font-extrabold px-2.5 py-1 rounded-full ${readiness.badgeColor.badge} border ${readiness.badgeColor.border} uppercase tracking-wide`}>
+              {readiness.readinessLevel}
+            </span>
+          </div>
+        </div>
+      </div>
+      {/* ─── END: Score Breakdown Section ─── */}
 
       {/* 7-Category Breakdown Section */}
       <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
