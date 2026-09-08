@@ -48,6 +48,43 @@ export interface SectionScores {
   readability: number;
 }
 
+export interface ReadinessCategoryScore {
+  id: string;
+  name: string;
+  score: number; // 0-100
+  weight: number; // decimal (e.g. 0.20)
+  weightedScore: number; // score * weight
+  status: 'Strong' | 'Moderate' | 'Needs Improvement';
+  summary: string;
+  itemsDetected: string[];
+}
+
+export type RecruiterReadinessLevel =
+  | 'Highly Recruiter Ready'
+  | 'Recruiter Ready'
+  | 'Needs Improvement'
+  | 'Early Preparation';
+
+export interface RecruiterReadinessResult {
+  overallScore: number; // 0-100
+  readinessLevel: RecruiterReadinessLevel;
+  badgeColor: {
+    bg: string;
+    text: string;
+    border: string;
+    badge: string;
+  };
+  categories: ReadinessCategoryScore[];
+  strengths: string[];
+  areasToImprove: string[];
+  recommendations: string[];
+  explanation: {
+    formula: string;
+    categoryWeights: Array<{ name: string; weightPercentage: number; score: number }>;
+    description: string;
+  };
+}
+
 export interface AnalysisResult {
   atsScore: number;
   atsCategory: 'Excellent' | 'Good' | 'Needs Improvement' | 'Critical Updates Needed';
@@ -64,6 +101,7 @@ export interface AnalysisResult {
   recommendedProjects: ProjectRecommendation[];
   suitableJobRoles: JobRoleMatch[];
   sectionScores: SectionScores;
+  recruiterReadiness?: RecruiterReadinessResult;
   analyzedAt: string;
 }
 
@@ -74,3 +112,4 @@ export interface SampleResume {
   fileName: string;
   text: string;
 }
+

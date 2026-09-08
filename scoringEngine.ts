@@ -848,3 +848,12 @@ export function analyzeGrammarAndPhrasing(
   return suggestions.slice(0, 3);
 }
 
+export {
+  computeRecruiterReadiness,
+  RECRUITER_READINESS_WEIGHTS,
+} from './src/utils/recruiterReadiness';
+export type {
+  ReadinessCategoryScore,
+  RecruiterReadinessLevel,
+  RecruiterReadinessResult,
+} from './src/utils/recruiterReadiness';

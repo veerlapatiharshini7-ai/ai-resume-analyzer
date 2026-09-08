@@ -14,6 +14,7 @@ import {
   extractCandidateSkillsCategorized,
   analyzeGrammarAndPhrasing,
   ROLE_TAXONOMY,
+  computeRecruiterReadiness,
 } from './scoringEngine';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -141,6 +142,15 @@ app.post(['/api/analyze-resume', '/api/analyze', '/analyze'], async (req, res) =
         : calculatedATS >= 50
         ? 'Needs Improvement'
         : 'Critical Updates Needed';
+
+    // Compute deterministic Recruiter Readiness Score (0-100) across 7 categories
+    const deterministicRecruiterReadiness = computeRecruiterReadiness({
+      resumeText,
+      candidateName: extractedCandidateName,
+      skillsFound: detSkillsFound,
+      missingSkills: detMissingSkills,
+      targetRole,
+    });
 
     const ai = getGeminiClient();
 
@@ -366,6 +376,7 @@ app.post(['/api/analyze-resume', '/api/analyze', '/analyze'], async (req, res) =
     result.skillsFound = detSkillsFound;
     result.missingSkills = detMissingSkills;
     result.grammarSuggestions = detGrammarSuggestions;
+    result.recruiterReadiness = deterministicRecruiterReadiness;
     result.usedFallback = false;
 
     // Deterministic deduplication and priority sorting for improvement tips
@@ -575,6 +586,13 @@ function generateFallbackAnalysis(text: string, targetRole: string, jobDescripti
     recommendedProjects: profile.projects,
     suitableJobRoles,
     sectionScores,
+    recruiterReadiness: computeRecruiterReadiness({
+      resumeText: text,
+      candidateName,
+      skillsFound,
+      missingSkills,
+      targetRole,
+    }),
     analyzedAt: new Date().toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',

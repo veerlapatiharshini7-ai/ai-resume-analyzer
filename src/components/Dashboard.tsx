@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { AnalysisResult } from '../types';
 import { CircularScore } from './CircularScore';
 import { downloadReportPDF } from '../utils/exportPdf';
+import { computeRecruiterReadiness, RecruiterReadinessResult } from '../utils/recruiterReadiness';
+import { RecruiterReadinessView } from './RecruiterReadinessView';
 import {
   CheckCircle2,
   AlertTriangle,
@@ -32,9 +34,20 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ result, onReset }) => {
-  const [activeTab, setActiveTab] = useState<'bento' | 'skills' | 'grammar' | 'roadmap' | 'jobs'>('bento');
+  const [activeTab, setActiveTab] = useState<'bento' | 'readiness' | 'skills' | 'grammar' | 'roadmap' | 'jobs'>('bento');
   const [isExporting, setIsExporting] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  // Safe fallback if recruiterReadiness wasn't pre-computed
+  const readiness: RecruiterReadinessResult =
+    result.recruiterReadiness ||
+    computeRecruiterReadiness({
+      resumeText: `${result.summary || ''} ${(result.strengths || []).join(' ')} ${(result.weaknesses || []).join(' ')}`,
+      candidateName: result.candidateName,
+      skillsFound: result.skillsFound,
+      missingSkills: result.missingSkills,
+      targetRole: result.targetRole,
+    });
 
   const handleExportPDF = async () => {
     setIsExporting(true);
@@ -43,18 +56,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ result, onReset }) => {
   };
 
   const handleCopySummary = () => {
-    const text = `AI Resume Analysis Report for ${result.candidateName}
+    const text = `AI Resume & Recruiter Readiness Report for ${result.candidateName}
 Target Role: ${result.targetRole}
 ATS Score: ${result.atsScore}/100 (${result.atsCategory})
+Recruiter Readiness Score: ${readiness.overallScore}/100 (${readiness.readinessLevel})
 
 SUMMARY:
 ${result.summary}
 
 TOP STRENGTHS:
-${result.strengths.map((s) => `• ${s}`).join('\n')}
+${readiness.strengths.map((s) => `• ${s}`).join('\n')}
 
-RECOMMENDED IMPROVEMENTS:
-${result.improvementTips.map((t) => `• [${t.section}] ${t.tip}`).join('\n')}
+RECRUITER READINESS CATEGORIES:
+${readiness.categories.map((c) => `• ${c.name}: ${c.score}/100 (${c.status}) - Weight ${Math.round(c.weight * 100)}%`).join('\n')}
+
+AREAS TO IMPROVE:
+${readiness.areasToImprove.map((a) => `• ${a}`).join('\n')}
+
+RECOMMENDED ACTIONS:
+${readiness.recommendations.map((r) => `• ${r}`).join('\n')}
 `;
     navigator.clipboard.writeText(text);
     setCopied(true);
@@ -129,6 +149,7 @@ ${result.improvementTips.map((t) => `• [${t.section}] ${t.tip}`).join('\n')}
       <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none border-b border-slate-200 dark:border-slate-800">
         {[
           { id: 'bento', label: '🍱 Bento Grid Overview' },
+          { id: 'readiness', label: '🎯 Recruiter Readiness' },
           { id: 'skills', label: '🎯 Skill Gap Radar' },
           { id: 'grammar', label: '✍️ Grammar & Tips' },
           { id: 'roadmap', label: '🚀 Career Roadmap' },
@@ -348,42 +369,68 @@ ${result.improvementTips.map((t) => `• [${t.section}] ${t.tip}`).join('\n')}
               )}
             </div>
 
-            {/* 5. File Status & Action Bento Tile (col-span-12 md:col-span-4) */}
-            <div className="md:col-span-4 bg-slate-800 dark:bg-slate-950 rounded-2xl p-6 text-white flex flex-col justify-between shadow-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-xs uppercase font-bold text-slate-400 tracking-widest">
-                  File Audit Status
-                </span>
-                <FileCheck2 className="w-5 h-5 text-emerald-400" />
+            {/* 5. Recruiter Readiness Score Bento Tile (col-span-12 md:col-span-4) */}
+            <div className="md:col-span-4 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-2xl p-6 text-white flex flex-col justify-between shadow-sm border border-slate-700/80">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs uppercase font-bold text-blue-400 tracking-widest flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Recruiter Readiness</span>
+                  </span>
+                  <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${readiness.badgeColor.badge} border ${readiness.badgeColor.border}`}>
+                    {readiness.readinessLevel}
+                  </span>
+                </div>
+
+                <div className="my-3.5 flex items-baseline gap-2">
+                  <span className="text-4xl font-black tracking-tight text-white">
+                    {readiness.overallScore}
+                  </span>
+                  <span className="text-lg font-bold text-slate-400">/ 100</span>
+                  <span className="text-xs font-semibold text-emerald-400 ml-auto">
+                    {readiness.readinessLevel}
+                  </span>
+                </div>
+
+                {/* Top Category Preview Bars */}
+                <div className="space-y-2 pt-2 border-t border-slate-700/60 text-xs">
+                  {readiness.categories.slice(0, 3).map((cat) => (
+                    <div key={cat.id} className="space-y-1">
+                      <div className="flex justify-between text-[11px] font-semibold text-slate-300">
+                        <span>{cat.name} ({Math.round(cat.weight * 100)}%)</span>
+                        <span className="font-mono">{cat.score}%</span>
+                      </div>
+                      <div className="w-full bg-slate-700 rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className={`h-1.5 rounded-full ${cat.score >= 75 ? 'bg-emerald-400' : cat.score >= 50 ? 'bg-blue-400' : 'bg-amber-400'}`}
+                          style={{ width: `${cat.score}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
 
-              <div className="my-4 space-y-1">
-                <p className="text-lg font-bold truncate text-white">
-                  {result.candidateName}_Resume.pdf
-                </p>
-                <p className="text-xs text-slate-400">
-                  Processed via Gemini 3.6 Flash AI Engine
-                </p>
-              </div>
-
-              <div className="space-y-2">
+              <div className="space-y-2 mt-4 pt-3 border-t border-slate-700/60">
                 <button
                   type="button"
-                  onClick={handleExportPDF}
-                  disabled={isExporting}
-                  className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold tracking-wider uppercase transition-colors shadow-sm flex items-center justify-center gap-2"
+                  id="bento-view-readiness-btn"
+                  onClick={() => setActiveTab('readiness')}
+                  className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold tracking-wider uppercase transition-colors shadow-sm flex items-center justify-center gap-1.5"
                 >
-                  <Download className="w-4 h-4" />
-                  <span>{isExporting ? 'Generating...' : 'Download Full PDF'}</span>
+                  <Target className="w-4 h-4" />
+                  <span>View Recruiter Breakdown</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setActiveTab('skills')}
-                  className="w-full py-2 bg-slate-700/80 hover:bg-slate-700 rounded-lg text-xs font-bold text-slate-300 transition-colors flex items-center justify-center gap-1"
+                  onClick={handleExportPDF}
+                  disabled={isExporting}
+                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 border border-slate-700"
                 >
-                  <span>Explore Skill Radar</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
+                  <Download className="w-3.5 h-3.5" />
+                  <span>{isExporting ? 'Generating...' : 'Download Full PDF'}</span>
                 </button>
               </div>
             </div>
@@ -430,6 +477,15 @@ ${result.improvementTips.map((t) => `• [${t.section}] ${t.tip}`).join('\n')}
               </div>
             </div>
           </div>
+        )}
+
+        {/* TAB: RECRUITER READINESS SCORE */}
+        {activeTab === 'readiness' && (
+          <RecruiterReadinessView
+            readiness={readiness}
+            candidateName={result.candidateName}
+            targetRole={result.targetRole}
+          />
         )}
 
         {/* TAB 2: SKILLS DEEP DIVE */}

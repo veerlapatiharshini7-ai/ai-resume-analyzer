@@ -4,12 +4,14 @@ interface CircularScoreProps {
   score: number;
   category: string;
   size?: number;
+  label?: string;
 }
 
 export const CircularScore: React.FC<CircularScoreProps> = ({
   score,
   category,
   size = 180,
+  label = '/ 100 ATS Score',
 }) => {
   const [animatedScore, setAnimatedScore] = useState(0);
 
@@ -82,7 +84,7 @@ export const CircularScore: React.FC<CircularScoreProps> = ({
             {animatedScore}
           </span>
           <span className="text-[10px] font-bold tracking-widest text-slate-400 uppercase">
-            / 100 ATS Score
+            {label}
           </span>
         </div>
       </div>
