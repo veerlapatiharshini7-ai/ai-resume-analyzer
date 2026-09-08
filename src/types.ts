@@ -74,3 +74,11 @@ export interface SampleResume {
   fileName: string;
   text: string;
 }
+
+export interface ResumeHistoryItem {
+  id: string;
+  fileName: string;
+  date: string;
+  atsScore: number;
+  result: AnalysisResult;
+}
