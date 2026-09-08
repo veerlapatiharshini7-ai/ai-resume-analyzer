@@ -5,6 +5,15 @@ import { GoogleGenAI, Type } from '@google/genai';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 
+const currentDirname = typeof __dirname !== 'undefined'
+  ? __dirname
+  : (typeof import.meta !== 'undefined' && import.meta?.url ? path.dirname(fileURLToPath(import.meta.url)) : process.cwd());
+
+// Load .env reliably from current working directory and module directory
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+if (path.resolve(currentDirname, '.env') !== path.resolve(process.cwd(), '.env')) {
+  dotenv.config({ path: path.resolve(currentDirname, '.env') });
+}
 dotenv.config();
 // Also load .env.local if present
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local'), override: true });
@@ -17,10 +26,6 @@ import {
   analyzeGrammarAndPhrasing,
   ROLE_TAXONOMY,
 } from './scoringEngine';
-
-const currentDirname = typeof __dirname !== 'undefined'
-  ? __dirname
-  : (typeof import.meta !== 'undefined' && import.meta?.url ? path.dirname(fileURLToPath(import.meta.url)) : process.cwd());
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
@@ -46,15 +51,62 @@ interface CacheEntry {
 const analysisCache = new Map<string, CacheEntry>();
 const MAX_CACHE_SIZE = 200;
 
+// Safe error sanitizer: redacts the actual GEMINI_API_KEY from messages, error objects, and stacks
+function sanitizeError(err: unknown): Record<string, unknown> | string {
+  const rawKey = process.env.GEMINI_API_KEY?.trim().replace(/^["']|["']$/g, '') || '';
+  const redact = (str: string): string => {
+    if (!str) return str;
+    if (rawKey && rawKey.length > 5) {
+      return str.split(rawKey).join('[REDACTED_GEMINI_KEY]');
+    }
+    return str;
+  };
+
+  if (!err) return 'Unknown error';
+
+  if (typeof err === 'object' && err !== null) {
+    const anyErr = err as any;
+    const sanitizedObj: Record<string, unknown> = {
+      name: redact(String(anyErr.name || 'Error')),
+      message: redact(String(anyErr.message || '')),
+      status: anyErr.status || anyErr.statusCode || anyErr.code || undefined,
+    };
+    if (anyErr.errorDetails) {
+      try {
+        sanitizedObj.errorDetails = JSON.parse(redact(JSON.stringify(anyErr.errorDetails)));
+      } catch {
+        sanitizedObj.errorDetails = redact(String(anyErr.errorDetails));
+      }
+    }
+    return sanitizedObj;
+  }
+
+  return redact(String(err));
+}
+
+// Model resolver ensuring valid, active model is used
+function getGeminiModel(): string {
+  const model = process.env.GEMINI_MODEL?.trim().replace(/^["']|["']$/g, '');
+  // Disallow retired models (e.g. gemini-2.5-flash / gemini-1.5-flash) that return 404 NOT_FOUND
+  if (!model || model === 'gemini-2.5-flash' || model === 'gemini-1.5-flash') {
+    return 'gemini-3.6-flash';
+  }
+  return model;
+}
+
 // Initialize Google Gen AI client with required User-Agent
 function getGeminiClient(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || !apiKey.trim() || apiKey === 'MY_GEMINI_API_KEY' || apiKey === 'your_actual_api_key_here') {
+  const rawKey = process.env.GEMINI_API_KEY;
+  if (!rawKey) {
+    return null;
+  }
+  const apiKey = rawKey.trim().replace(/^["']|["']$/g, '');
+  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || apiKey === 'your_actual_api_key_here') {
     return null;
   }
   try {
     return new GoogleGenAI({
-      apiKey: apiKey.trim(),
+      apiKey,
       httpOptions: {
         headers: {
           'User-Agent': 'aistudio-build',
@@ -62,7 +114,7 @@ function getGeminiClient(): GoogleGenAI | null {
       },
     });
   } catch (err) {
-    console.error('Failed to initialize GoogleGenAI client:', err);
+    console.error('Failed to initialize GoogleGenAI client:', sanitizeError(err));
     return null;
   }
 }
@@ -76,12 +128,13 @@ function clampToInt100(value: unknown): number {
 
 // Health check endpoint
 app.get(['/api/health', '/health'], (_req, res) => {
-  const apiKey = process.env.GEMINI_API_KEY;
-  const hasValidApiKey = !!apiKey && apiKey.trim().length > 0 && apiKey !== 'MY_GEMINI_API_KEY' && apiKey !== 'your_actual_api_key_here';
+  const rawKey = process.env.GEMINI_API_KEY;
+  const apiKey = rawKey ? rawKey.trim().replace(/^["']|["']$/g, '') : '';
+  const hasValidApiKey = !!apiKey && apiKey.length > 0 && apiKey !== 'MY_GEMINI_API_KEY' && apiKey !== 'your_actual_api_key_here';
   res.json({
     status: 'ok',
     hasApiKey: hasValidApiKey,
-    model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+    model: getGeminiModel(),
     timestamp: new Date().toISOString(),
   });
 });
@@ -501,20 +554,23 @@ app.post(['/api/generate-cover-letter', '/api/cover-letter'], async (req, res) =
     .update(`coverletter:::${resumeText.trim()}:::${targetRole.trim()}:::${(companyName || '').trim()}:::${(jobDescription || '').trim()}:::${sanitizedTone}`)
     .digest('hex');
 
-  // Return cached result if exact same inputs were provided
+  // Return cached result if exact same inputs were provided (only return cached fallback if AI client is unavailable)
   if (analysisCache.has(cacheKey)) {
     const cached = analysisCache.get(cacheKey)!.data;
-    console.log('Returning CACHED cover letter for hash:', cacheKey);
-    return res.json({
-      ...cached,
-      generatedAt: new Date().toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-    });
+    const hasAI = !!getGeminiClient();
+    if (!cached?.usedFallback || !hasAI) {
+      console.log('Returning CACHED cover letter for hash:', cacheKey);
+      return res.json({
+        ...cached,
+        generatedAt: new Date().toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+      });
+    }
   }
 
   const ai = getGeminiClient();
@@ -594,8 +650,11 @@ ${resumeText.slice(0, 12000)}
 
 Draft the personalized cover letter adhering strictly to all requirements.`;
 
+    const activeModel = getGeminiModel();
+    console.log(`[COVER LETTER] Requesting generation via Gemini API with model: "${activeModel}"...`);
+
     const response = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+      model: activeModel,
       contents: prompt,
       config: {
         temperature: 0.2,
@@ -611,7 +670,10 @@ Draft the personalized cover letter adhering strictly to all requirements.`;
       },
     });
 
-    const jsonText = response.text || '';
+    let jsonText = (response.text || '').trim();
+    if (jsonText.startsWith('```')) {
+      jsonText = jsonText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    }
     const parsed = JSON.parse(jsonText);
     const coverLetterText = (parsed.coverLetter || '').trim();
     const wordCount = coverLetterText.split(/\s+/).filter(Boolean).length;
@@ -646,11 +708,12 @@ Draft the personalized cover letter adhering strictly to all requirements.`;
       tone: sanitizedTone,
       wordCount,
       usedFallback: false,
+      model: activeModel,
     });
 
     return res.json(result);
   } catch (err) {
-    console.error('[GEMINI FAILURE - COVER LETTER] Falling back. Reason:', err);
+    console.error('[GEMINI FAILURE - COVER LETTER] Actual API Error (Sanitized):', JSON.stringify(sanitizeError(err), null, 2));
     try {
       const fallback = generateFallbackCoverLetter({
         resumeText,
@@ -661,15 +724,12 @@ Draft the personalized cover letter adhering strictly to all requirements.`;
         candidateName,
       });
 
-      if (analysisCache.size >= MAX_CACHE_SIZE) {
-        const oldestKey = analysisCache.keys().next().value;
-        if (oldestKey) analysisCache.delete(oldestKey);
-      }
-      analysisCache.set(cacheKey, { data: fallback, timestamp: Date.now() });
+      // Do not cache temporary API failure fallbacks so subsequent attempts can succeed with Gemini
+      analysisCache.delete(cacheKey);
 
       return res.json(fallback);
     } catch (fallbackErr) {
-      console.error('[COVER LETTER FALLBACK FAILURE]:', fallbackErr);
+      console.error('[COVER LETTER FALLBACK FAILURE]:', sanitizeError(fallbackErr));
       return res.status(500).json({
         error: 'Failed to generate cover letter. Please verify your resume input.',
       });
