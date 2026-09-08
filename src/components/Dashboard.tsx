@@ -375,7 +375,9 @@ ${result.improvementTips.map((t) => `• [${t.section}] ${t.tip}`).join('\n')}
                   {result.candidateName}_Resume.pdf
                 </p>
                 <p className="text-xs text-slate-400">
-                  Processed via Gemini 3.6 Flash AI Engine
+                  {result.usedFallback
+                    ? 'Processed via Deterministic ATS Engine'
+                    : 'Processed via Gemini 2.5 Flash AI Engine'}
                 </p>
               </div>
 

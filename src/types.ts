@@ -65,6 +65,7 @@ export interface AnalysisResult {
   suitableJobRoles: JobRoleMatch[];
   sectionScores: SectionScores;
   analyzedAt: string;
+  usedFallback?: boolean;
 }
 
 export interface SampleResume {

@@ -6,6 +6,8 @@ import crypto from 'crypto';
 import dotenv from 'dotenv';
 
 dotenv.config();
+// Also load .env.local if present
+dotenv.config({ path: path.resolve(process.cwd(), '.env.local'), override: true });
 
 import {
   computeSectionScores,
@@ -16,11 +18,12 @@ import {
   ROLE_TAXONOMY,
 } from './scoringEngine';
 
-const currentFilename = typeof import.meta?.url === 'string' && import.meta.url ? fileURLToPath(import.meta.url) : '';
-const currentDirname = currentFilename ? path.dirname(currentFilename) : process.cwd();
+const currentDirname = typeof __dirname !== 'undefined'
+  ? __dirname
+  : (typeof import.meta !== 'undefined' && import.meta?.url ? path.dirname(fileURLToPath(import.meta.url)) : process.cwd());
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -44,19 +47,24 @@ const analysisCache = new Map<string, CacheEntry>();
 const MAX_CACHE_SIZE = 200;
 
 // Initialize Google Gen AI client with required User-Agent
-function getGeminiClient() {
+function getGeminiClient(): GoogleGenAI | null {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
+  if (!apiKey || !apiKey.trim() || apiKey === 'MY_GEMINI_API_KEY' || apiKey === 'your_actual_api_key_here') {
     return null;
   }
-  return new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
+  try {
+    return new GoogleGenAI({
+      apiKey: apiKey.trim(),
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
       },
-    },
-  });
+    });
+  } catch (err) {
+    console.error('Failed to initialize GoogleGenAI client:', err);
+    return null;
+  }
 }
 
 // Helper to clamp any numeric-ish value to an integer in [0,100]
@@ -68,9 +76,12 @@ function clampToInt100(value: unknown): number {
 
 // Health check endpoint
 app.get(['/api/health', '/health'], (_req, res) => {
+  const apiKey = process.env.GEMINI_API_KEY;
+  const hasValidApiKey = !!apiKey && apiKey.trim().length > 0 && apiKey !== 'MY_GEMINI_API_KEY' && apiKey !== 'your_actual_api_key_here';
   res.json({
     status: 'ok',
-    hasApiKey: !!process.env.GEMINI_API_KEY,
+    hasApiKey: hasValidApiKey,
+    model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
     timestamp: new Date().toISOString(),
   });
 });
@@ -247,7 +258,7 @@ app.post(['/api/analyze-resume', '/api/analyze', '/analyze'], async (req, res) =
 - sectionScores (object with formatting: number, keywords: number, experienceImpact: number, skillsMatch: number, readability: number - each 0-100)`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+      model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
       contents: prompt,
       config: {
         temperature: 0,
@@ -584,7 +595,7 @@ ${resumeText.slice(0, 12000)}
 Draft the personalized cover letter adhering strictly to all requirements.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+      model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
       contents: prompt,
       config: {
         temperature: 0.2,
@@ -640,22 +651,29 @@ Draft the personalized cover letter adhering strictly to all requirements.`;
     return res.json(result);
   } catch (err) {
     console.error('[GEMINI FAILURE - COVER LETTER] Falling back. Reason:', err);
-    const fallback = generateFallbackCoverLetter({
-      resumeText,
-      targetRole,
-      companyName,
-      jobDescription,
-      tone: sanitizedTone,
-      candidateName,
-    });
+    try {
+      const fallback = generateFallbackCoverLetter({
+        resumeText,
+        targetRole,
+        companyName,
+        jobDescription,
+        tone: sanitizedTone,
+        candidateName,
+      });
 
-    if (analysisCache.size >= MAX_CACHE_SIZE) {
-      const oldestKey = analysisCache.keys().next().value;
-      if (oldestKey) analysisCache.delete(oldestKey);
+      if (analysisCache.size >= MAX_CACHE_SIZE) {
+        const oldestKey = analysisCache.keys().next().value;
+        if (oldestKey) analysisCache.delete(oldestKey);
+      }
+      analysisCache.set(cacheKey, { data: fallback, timestamp: Date.now() });
+
+      return res.json(fallback);
+    } catch (fallbackErr) {
+      console.error('[COVER LETTER FALLBACK FAILURE]:', fallbackErr);
+      return res.status(500).json({
+        error: 'Failed to generate cover letter. Please verify your resume input.',
+      });
     }
-    analysisCache.set(cacheKey, { data: fallback, timestamp: Date.now() });
-
-    return res.json(fallback);
   }
 });
 
@@ -897,7 +915,9 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server listening on http://0.0.0.0:${PORT}`);
+    console.log(`Backend server ready at:`);
+    console.log(`  - Local:   http://localhost:${PORT}`);
+    console.log(`  - Network: http://127.0.0.1:${PORT}`);
   });
 }
 

@@ -101,8 +101,20 @@ export const CoverLetterGenerator: React.FC<CoverLetterGeneratorProps> = ({
       });
 
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Server error while generating cover letter.');
+        let errorMsg = 'Server error while generating cover letter.';
+        try {
+          const errData = await res.json();
+          if (errData?.error) errorMsg = errData.error;
+        } catch {
+          if (res.status === 404) {
+            errorMsg = 'Backend API endpoint not found (404). Please ensure the backend server is running on port 3000 (npm run dev).';
+          } else if (res.status === 502 || res.status === 503) {
+            errorMsg = 'Backend server unavailable. Please make sure the backend is running on port 3000.';
+          } else {
+            errorMsg = `Server returned status ${res.status}. Please check backend logs.`;
+          }
+        }
+        throw new Error(errorMsg);
       }
 
       const data: CoverLetterResponse = await res.json();
@@ -110,11 +122,20 @@ export const CoverLetterGenerator: React.FC<CoverLetterGeneratorProps> = ({
       setLastResponse(data);
     } catch (err: unknown) {
       console.error('Error generating cover letter:', err);
-      setError(
-        err instanceof Error
-          ? err.message
-          : 'An unexpected error occurred while generating the cover letter. Please try again.'
-      );
+      let message = 'An unexpected error occurred while generating the cover letter. Please try again.';
+      if (err instanceof Error) {
+        if (
+          err.message.includes('Failed to fetch') ||
+          err.message.includes('NetworkError') ||
+          err.message.includes('ECONNREFUSED') ||
+          err.message.includes('Load failed')
+        ) {
+          message = 'Cannot connect to the backend server. Please verify the server is running on port 3000 (run "npm run dev").';
+        } else {
+          message = err.message;
+        }
+      }
+      setError(message);
     } finally {
       setIsLoading(false);
     }
@@ -376,6 +397,11 @@ export const CoverLetterGenerator: React.FC<CoverLetterGeneratorProps> = ({
                     {lastResponse && (
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300">
                         {selectedTone} Tone
+                      </span>
+                    )}
+                    {lastResponse?.usedFallback && (
+                      <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800/50" title="Generated using deterministic smart templates because GEMINI_API_KEY is unconfigured">
+                        Deterministic Fallback Mode
                       </span>
                     )}
                   </div>
