@@ -96,3 +96,11 @@ export interface CoverLetterResponse {
   usedFallback?: boolean;
   generatedAt?: string;
 }
+
+export interface ResumeHistoryItem {
+  id: string;
+  fileName: string;
+  date: string;
+  atsScore: number;
+  result: AnalysisResult;
+}

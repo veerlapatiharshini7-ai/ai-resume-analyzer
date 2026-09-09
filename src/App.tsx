@@ -4,8 +4,9 @@ import { HeroSection } from './components/HeroSection';
 import { FileUploader } from './components/FileUploader';
 import { LoadingScreen } from './components/LoadingScreen';
 import { Dashboard } from './components/Dashboard';
-import { CoverLetterGenerator } from './components/CoverLetterGenerator';
-import { AnalysisResult } from './types';
+import { CoverLetterGenerator } from './components/Cover LetterGenerator';
+import { ResumeHistory } from './components/ResumeHistory';
+import { AnalysisResult, ResumeHistoryItem } from './types';
 import { SAMPLE_RESUMES } from './data/sampleResumes';
 
 export default function App() {
@@ -25,6 +26,22 @@ export default function App() {
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Resume History stored in localStorage (up to 10 latest items)
+  const [history, setHistory] = useState<ResumeHistoryItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('resume_history');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.slice(0, 10);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load resume history from localStorage', e);
+    }
+    return [];
+  });
 
   // Apply dark class to <html> element
   useEffect(() => {
@@ -68,6 +85,37 @@ export default function App() {
 
       const data: AnalysisResult = await response.json();
       setAnalysisResult(data);
+
+      // Save to Resume History (keep up to 10 latest items)
+      const newItem: ResumeHistoryItem = {
+        id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        fileName:
+          fileName?.trim() ||
+          (data.candidateName && data.candidateName !== 'Professional Candidate'
+            ? `${data.candidateName.replace(/\s+/g, '_')}_Resume.pdf`
+            : 'Uploaded_Resume.pdf'),
+        date:
+          data.analyzedAt ||
+          new Date().toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+        atsScore: data.atsScore,
+        result: data,
+      };
+
+      setHistory((prev) => {
+        const updated = [newItem, ...prev].slice(0, 10);
+        try {
+          localStorage.setItem('resume_history', JSON.stringify(updated));
+        } catch (e) {
+          console.error('Failed to save resume history to localStorage', e);
+        }
+        return updated;
+      });
     } catch (err: unknown) {
       console.error('Error analyzing resume:', err);
       setError(
@@ -96,6 +144,28 @@ export default function App() {
     setActiveView('analyzer');
   };
 
+  const handleViewAnalysis = (item: ResumeHistoryItem) => {
+    if (item.result) {
+      if (item.result.targetRole) {
+        setTargetRole(item.result.targetRole);
+      }
+      setAnalysisResult(item.result);
+      setError(null);
+    }
+  };
+
+  const handleScrollToHistory = () => {
+    if (analysisResult) {
+      setAnalysisResult(null);
+    }
+    setTimeout(() => {
+      const el = document.getElementById('resume-history-section');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth' });
+      }
+    }, 60);
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 transition-colors flex flex-col font-sans">
       {/* Navbar Header */}
@@ -107,19 +177,47 @@ export default function App() {
         onLoadSample={handleLoadSample}
         activeView={activeView}
         onNavigateView={setActiveView}
+
+        historyCount={history.length}
+        onScrollToHistory={handleScrollToHistory}
+
       />
 
       {/* Main Content Area */}
       <main className="flex-1">
-        {/* Cover Letter Generator View */}
-        {activeView === 'cover-letter' && (
-          <CoverLetterGenerator
-            initialResumeText={currentResumeText}
-            initialTargetRole={targetRole}
-            initialJobDescription={jobDescription}
-            initialFileName={currentFileName}
-            onBackToAnalyzer={() => setActiveView('analyzer')}
-          />
+{/* Cover Letter Generator View */}
+{activeView === 'cover-letter' && (
+  <CoverLetterGenerator
+    initialResumeText={currentResumeText}
+    initialTargetRole={targetRole}
+    initialJobDescription={jobDescription}
+    initialFileName={currentFileName}
+    onBackToAnalyzer={() => setActiveView('analyzer')}
+  />
+)}
+
+{!analysisResult && !isLoading && (
+  <div>
+    <HeroSection
+      targetRole={targetRole}
+      onTargetRoleChange={setTargetRole}
+      jobDescription={jobDescription}
+      onJobDescriptionChange={setJobDescription}
+    />
+
+    <FileUploader
+      onAnalyze={handleAnalyzeResume}
+      isLoading={isLoading}
+      error={error}
+    />
+
+    {/* Resume History Section */}
+    <ResumeHistory
+      history={history}
+      onViewAnalysis={handleViewAnalysis}
+    />
+  </div>
+)}
         )}
 
         {/* Resume Analyzer View */}
