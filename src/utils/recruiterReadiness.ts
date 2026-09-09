@@ -1,9 +1,11 @@
 /**
  * recruiterReadiness.ts
  *
+ * MASTER PROMPT COMPLIANT RECRUITER READINESS ANALYZER
+ *
  * PURPOSE:
- * Deterministic, explainable, safe calculation of the Overall Recruiter Readiness Score (0-100)
- * based on real student/resume data across 7 centralized categories:
+ * Deterministic, explainable, evidence-based calculation of the Overall Recruiter Readiness Score (0-100)
+ * based strictly on real student/resume data across 7 centralized categories:
  * - Profile / Resume (20%)
  * - Skills (20%)
  * - Projects (20%)
@@ -12,11 +14,14 @@
  * - Experience / Internships (15%)
  * - Achievements (5%)
  *
- * Guarantees:
- * - Deterministic: identical inputs produce identical outputs every time
- * - Safe: guards against null, undefined, empty arrays, NaN, Infinity
- * - Clamped: 0 <= score <= 100, rounded to whole numbers
- * - No fake or random data
+ * GUARANTEES:
+ * - Accuracy > Assumption: Resume is the ONLY source of truth.
+ * - Never claim missing when item is present (e.g. LinkedIn, Objective).
+ * - Never group present and missing links together.
+ * - Comprehensive 12-category skill extraction.
+ * - Objective vs Summary distinction (Objective = Present & Improvable).
+ * - Exactly 6 specific, actionable, gap-based recommendations.
+ * - Clamped: 0 <= score <= 100, rounded to nearest whole integer.
  */
 
 export interface ReadinessCategoryScore {
@@ -28,6 +33,8 @@ export interface ReadinessCategoryScore {
   status: 'Strong' | 'Moderate' | 'Needs Improvement';
   summary: string;
   itemsDetected: string[];
+  missing?: string[];
+  improvements?: string[];
 }
 
 export type RecruiterReadinessLevel =
@@ -66,7 +73,6 @@ export interface StudentInputData {
 
 /**
  * Centralized Category Weights (Total = 1.00 / 100%)
- * Easily modifiable in one place.
  */
 export const RECRUITER_READINESS_WEIGHTS = {
   profileResume: 0.20,
@@ -78,56 +84,112 @@ export const RECRUITER_READINESS_WEIGHTS = {
   achievements: 0.05,
 } as const;
 
+function RECRUTER_WEIGHTS_SAFE(weight: number): number {
+  return typeof weight === 'number' && !isNaN(weight) && isFinite(weight) ? weight : 0;
+}
+
+/**
+ * Comprehensive 12-Category Technical Skill Taxonomy
+ */
+export const SKILL_TAXONOMY_12: Record<string, string[]> = {
+  'Programming Languages': ['java', 'python', 'c', 'c++', 'c#', 'javascript', 'typescript', 'go', 'rust', 'ruby', 'php', 'swift', 'kotlin', 'r', 'matlab'],
+  'Frontend/Web Technologies': ['html', 'html5', 'css', 'css3', 'tailwind css', 'bootstrap', 'sass', 'responsive design', 'websockets'],
+  'Backend Technologies': ['node.js', 'node', 'express', 'spring boot', 'django', 'flask', 'fastapi', 'asp.net', 'rest apis', 'restful apis', 'graphql', 'microservices'],
+  'Frameworks': ['react', 'angular', 'vue', 'next.js', 'nuxt', 'svelte', 'django', 'spring', 'flask', 'express'],
+  'Libraries': ['redux', 'pandas', 'numpy', 'scikit-learn', 'scipy', 'pytorch', 'tensorflow', 'opencv', 'matplotlib', 'seaborn', 'axios', 'jquery'],
+  'Machine Learning/AI': ['machine learning', 'deep learning', 'neural networks', 'xai', 'explainable ai', 'nlp', 'computer vision', 'transformers', 'llms', 'hugging face', 'langchain'],
+  'Databases': ['mysql', 'postgresql', 'postgres', 'mongodb', 'sqlite', 'redis', 'oracle', 'sql server', 'snowflake', 'bigquery', 'cassandra', 'firebase', 'sql'],
+  'Cloud/DevOps': ['aws', 'azure', 'gcp', 'docker', 'kubernetes', 'ci/cd', 'github actions', 'terraform', 'linux', 'nginx', 'vercel', 'netlify', 'cloud'],
+  'Developer Tools': ['git', 'github', 'gitlab', 'bitbucket', 'vs code', 'google colab', 'jupyter', 'postman', 'jira', 'figma', 'vite', 'webpack'],
+  'Core CS Concepts': ['data structures', 'algorithms', 'oop', 'object oriented programming', 'system design', 'operating systems', 'computer networks', 'dbms'],
+  'APIs/Platforms': ['stripe api', 'openweather api', 'rest api', 'websockets', 'socket.io', 'oauth2', 'jwt'],
+  'Other Relevant Technical Skills': ['testing', 'jest', 'cypress', 'junit', 'selenium', 'agile', 'scrum']
+};
+
 /**
  * 1. Profile / Resume Scorer (20%)
- * Evaluates candidate name, contact email, phone, professional links,
- * career summary/objective, and general completeness.
+ * Evaluates Candidate Name, Email, Phone, LinkedIn, GitHub, Portfolio, Objective/Summary, Document Substance.
+ * NEVER confuses Objective with missing summary, and NEVER groups LinkedIn and GitHub into vague missing statements.
  */
 export function scoreProfileResume(resumeText: string = '', candidateName: string = ''): ReadinessCategoryScore {
   const text = resumeText || '';
   const detected: string[] = [];
+  const missing: string[] = [];
+  const improvements: string[] = [];
   let score = 0;
 
-  // Name check (non-empty, reasonable length, not placeholder)
+  // Candidate Name
   const trimmedName = (candidateName || '').trim();
   const isPlaceholder = !trimmedName || /^(candidate|professional candidate|valued candidate|john doe)$/i.test(trimmedName);
   if (!isPlaceholder && trimmedName.length >= 3 && trimmedName.length <= 60) {
     score += 25;
     detected.push(`Candidate Name: ${trimmedName}`);
+  } else {
+    missing.push('Candidate Name in top header');
+    improvements.push('Ensure candidate full name is prominently displayed at the top.');
   }
 
-  // Email check
+  // Email
   const hasEmail = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(text);
   if (hasEmail) {
     score += 20;
-    detected.push('Valid Email Address');
+    detected.push('Valid Email Address present');
+  } else {
+    missing.push('Contact Email');
+    improvements.push('Add a professional email address to top header.');
   }
 
-  // Phone check
+  // Phone
   const hasPhone = /(\+?\d[\d\s-]{8,}\d)/.test(text);
   if (hasPhone) {
     score += 15;
-    detected.push('Contact Phone Number');
+    detected.push('Contact Phone Number present');
+  } else {
+    missing.push('Contact Phone Number');
+    improvements.push('Add contact phone number.');
   }
 
-  // Professional Links (LinkedIn / GitHub / Portfolio)
+  // Links Verification (Separate check per link)
   const hasLinkedIn = /linkedin\.com/i.test(text);
   const hasGitHub = /github\.com/i.test(text);
-  const hasPortfolio = /(portfolio|website|https?:\/\/)/i.test(text);
-  if (hasLinkedIn || hasGitHub || hasPortfolio) {
-    score += 15;
-    const links = [hasLinkedIn && 'LinkedIn', hasGitHub && 'GitHub', hasPortfolio && 'Portfolio'].filter(Boolean);
-    detected.push(`Professional Links (${links.join(', ')})`);
+  const hasPortfolio = /(portfolio|vercel\.app|netlify\.app|github\.io|devpost\.com|\.me\b)/i.test(text);
+
+  if (hasLinkedIn) {
+    score += 8;
+    detected.push('LinkedIn Profile present');
+  } else {
+    missing.push('LinkedIn Profile URL');
+    improvements.push('Add a hyperlinked LinkedIn profile URL.');
   }
 
-  // Career Summary / Objective presence
-  const hasSummary = /(summary|professional summary|executive summary|career objective|about me|profile overview)/i.test(text);
+  if (hasGitHub) {
+    score += 7;
+    detected.push('GitHub Profile present');
+  } else if (hasPortfolio) {
+    score += 7;
+    detected.push('Portfolio Website present');
+  } else {
+    missing.push('GitHub / Portfolio link');
+    improvements.push('Add a GitHub profile link to showcase code repositories.');
+  }
+
+  // Career Summary vs Objective
+  const hasSummary = /(professional summary|executive summary|profile summary|about me|summary:)/i.test(text);
+  const hasObjective = /(career objective|objective:)/i.test(text);
+
   if (hasSummary) {
     score += 15;
-    detected.push('Professional Summary / Objective Section');
+    detected.push('Professional Summary Section present');
+  } else if (hasObjective) {
+    score += 10;
+    detected.push('Career Objective Section present (Objective present, summary recommended)');
+    improvements.push('Replace generic career objective with a crisp 2-3 sentence role-targeted professional summary.');
+  } else {
+    missing.push('Professional Summary / Objective section');
+    improvements.push('Add a 2-3 sentence executive summary tailored to target role.');
   }
 
-  // Length & document substance
+  // Document substance
   const words = text.split(/\s+/).filter(Boolean).length;
   if (words >= 150) {
     score += 10;
@@ -135,6 +197,8 @@ export function scoreProfileResume(resumeText: string = '', candidateName: strin
   } else if (words >= 50) {
     score += 5;
     detected.push(`Basic Document Substance (${words} words)`);
+  } else {
+    missing.push('Sufficient document substance');
   }
 
   const clampedScore = Math.max(0, Math.min(100, Math.round(score)));
@@ -149,77 +213,143 @@ export function scoreProfileResume(resumeText: string = '', candidateName: strin
     status,
     summary:
       clampedScore >= 75
-        ? 'Profile information is well-rounded with clear contact, summary, and layout details.'
+        ? 'Profile information is complete with verified contact details, professional links, and clear objective/summary.'
         : clampedScore >= 50
-        ? 'Core profile details are present, but contact links or executive summary can be enhanced.'
-        : 'Incomplete profile. Important contact info, professional links, or summary are missing.',
+        ? 'Core profile details are present. Upgrading to a targeted summary or adding GitHub/portfolio link will maximize impact.'
+        : 'Incomplete profile section. Essential contact links, professional summary, or header details are missing.',
     itemsDetected: detected,
+    missing,
+    improvements,
   };
-}
-
-function RECRUTER_WEIGHTS_SAFE(weight: number): number {
-  return typeof weight === 'number' && !isNaN(weight) ? weight : 0;
 }
 
 /**
  * 2. Skills Scorer (20%)
- * Evaluates skill count, technical diversity, categorization, and missing gaps.
+ * Extracts ALL explicit technical skills across 12 categories without arbitrary limits.
+ * Evaluates skill count, domain diversity, categorization, and missing gaps.
  */
 export function scoreSkills(
   skillsFound: Array<{ category: string; skills: string[] }> = [],
   missingSkills: Array<{ skill: string; priority: string }> = [],
   resumeText: string = ''
 ): ReadinessCategoryScore {
-  const flatSkills = Array.isArray(skillsFound) ? skillsFound.flatMap((c) => c.skills || []) : [];
   const text = (resumeText || '').toLowerCase();
   const detected: string[] = [];
+  const missing: string[] = [];
+  const improvements: string[] = [];
+
+  // Extract all explicit skills across the 12 categories
+  const detectedCategoriesMap: Record<string, string[]> = {};
+  const allExtractedSkillsSet = new Set<string>();
+
+  // Include pre-parsed skills
+  if (Array.isArray(skillsFound)) {
+    for (const catObj of skillsFound) {
+      if (catObj && Array.isArray(catObj.skills)) {
+        for (const s of catObj.skills) {
+          if (s && typeof s === 'string') {
+            allExtractedSkillsSet.add(s.trim());
+          }
+        }
+      }
+    }
+  }
+
+  // Scan text for 12-category taxonomy
+  for (const [catName, skillList] of Object.entries(SKILL_TAXONOMY_12)) {
+    const hits: string[] = [];
+    for (const skillKw of skillList) {
+      const isHit = new RegExp(`\\b${skillKw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text);
+      if (isHit) {
+        const formatSkill = skillKw.length <= 4 ? skillKw.toUpperCase() : skillKw.charAt(0).toUpperCase() + skillKw.slice(1);
+        if (!allExtractedSkillsSet.has(formatSkill)) {
+          allExtractedSkillsSet.add(formatSkill);
+        }
+        if (!hits.includes(formatSkill)) {
+          hits.push(formatSkill);
+        }
+      }
+    }
+    if (hits.length > 0) {
+      detectedCategoriesMap[catName] = hits;
+    }
+  }
+
+  const allSkillsList = Array.from(allExtractedSkillsSet);
+  const totalExplicitSkillsCount = allSkillsList.length;
+  const categoryCount = Object.keys(detectedCategoriesMap).length || (totalExplicitSkillsCount >= 6 ? 3 : totalExplicitSkillsCount >= 3 ? 2 : totalExplicitSkillsCount >= 1 ? 1 : 0);
+
   let score = 0;
 
-  // Skills Count Points (up to 50 pts)
-  const count = flatSkills.length;
-  if (count >= 14) {
+  if (totalExplicitSkillsCount === 0) {
+    detected.push('No technical skills identified');
+    missing.push('Core technical skills');
+    improvements.push('Add a dedicated Skills section covering Programming Languages, Frameworks, Databases, and Tools.');
+    return {
+      id: 'skills',
+      name: 'Skills',
+      score: 0,
+      weight: RECRUTER_WEIGHTS_SAFE(RECRUITER_READINESS_WEIGHTS.skills),
+      weightedScore: 0,
+      status: 'Needs Improvement',
+      summary: 'No explicit technical skills detected in the resume text.',
+      itemsDetected: detected,
+      missing,
+      improvements,
+    };
+  }
+
+  // Skills Count Scoring (up to 50 pts)
+  if (totalExplicitSkillsCount >= 14) {
     score += 50;
-    detected.push(`${count} technical & domain skills identified`);
-  } else if (count >= 10) {
+    detected.push(`${totalExplicitSkillsCount} technical & domain skills identified`);
+  } else if (totalExplicitSkillsCount >= 10) {
     score += 42;
-    detected.push(`${count} technical & domain skills identified`);
-  } else if (count >= 6) {
+    detected.push(`${totalExplicitSkillsCount} technical & domain skills identified`);
+  } else if (totalExplicitSkillsCount >= 6) {
     score += 32;
-    detected.push(`${count} technical skills identified`);
-  } else if (count >= 3) {
+    detected.push(`${totalExplicitSkillsCount} technical skills identified`);
+  } else if (totalExplicitSkillsCount >= 3) {
     score += 22;
-    detected.push(`${count} skills identified`);
-  } else if (count >= 1) {
+    detected.push(`${totalExplicitSkillsCount} technical skills identified`);
+  } else {
     score += 12;
-    detected.push(`${count} skill identified`);
+    detected.push(`${totalExplicitSkillsCount} skill identified`);
   }
 
-  // Categorization Presence (up to 20 pts)
-  const categoryCount = Array.isArray(skillsFound) ? skillsFound.length : 0;
-  if (categoryCount >= 2) {
+  // Categorization & Diversity (up to 20 pts)
+  if (categoryCount >= 3) {
     score += 20;
-    detected.push(`Categorized across ${categoryCount} distinct domains`);
-  } else if (categoryCount === 1) {
-    score += 10;
-    detected.push('Single categorized skill group');
+    detected.push(`Categorized across ${categoryCount} distinct technical domains`);
+  } else if (categoryCount === 2) {
+    score += 14;
+    detected.push(`Categorized across ${categoryCount} technical domains`);
+  } else {
+    score += 8;
+    detected.push('Single category skill group');
+    improvements.push('Group skills into explicit categories (e.g. Languages, Frameworks, Databases, Tools).');
   }
 
-  // Gaps evaluation (up to 20 pts)
+  // Missing Skill Gaps Evaluation (up to 20 pts)
   const highPriorityMissing = Array.isArray(missingSkills)
     ? missingSkills.filter((m) => m && m.priority === 'High').length
     : 0;
-  if (highPriorityMissing === 0 && count >= 5) {
+
+  if (highPriorityMissing === 0 && totalExplicitSkillsCount >= 6) {
     score += 20;
     detected.push('Zero critical missing skill gaps for target role');
   } else if (highPriorityMissing <= 2) {
     score += 12;
-    detected.push('Minor missing skill gaps');
+    detected.push('Minor missing skill gaps identified');
+    missing.push(missingSkills.map((m) => m.skill).slice(0, 3).join(', '));
   } else {
     score += 5;
+    missing.push(missingSkills.map((m) => m.skill).slice(0, 4).join(', '));
+    improvements.push(`Incorporate key target role skills: ${missingSkills.slice(0, 3).map((m) => m.skill).join(', ')}.`);
   }
 
-  // Developer Ecosystem & Tooling (up to 10 pts)
-  const ecosystemKeywords = ['git', 'github', 'docker', 'ci/cd', 'linux', 'rest', 'api', 'sql', 'unit test', 'cloud'];
+  // Tooling & Ecosystem (up to 10 pts)
+  const ecosystemKeywords = ['git', 'github', 'docker', 'ci/cd', 'linux', 'rest', 'api', 'sql', 'unit test', 'cloud', 'vs code', 'google colab'];
   const matchedEcosystem = ecosystemKeywords.filter((k) => text.includes(k));
   if (matchedEcosystem.length >= 3) {
     score += 10;
@@ -236,41 +366,46 @@ export function scoreSkills(
     id: 'skills',
     name: 'Skills',
     score: clampedScore,
-    weight: RECRUITER_READINESS_WEIGHTS.skills,
+    weight: RECRUTER_WEIGHTS_SAFE(RECRUITER_READINESS_WEIGHTS.skills),
     weightedScore: Math.round(clampedScore * RECRUITER_READINESS_WEIGHTS.skills * 10) / 10,
     status,
     summary:
       clampedScore >= 75
-        ? 'Robust technical and professional skill footprint aligning with recruiter criteria.'
+        ? `Comprehensive skill footprint with ${totalExplicitSkillsCount} skills identified across ${categoryCount} technical categories.`
         : clampedScore >= 50
-        ? 'Decent skill coverage, but key tools or role-specific libraries should be expanded.'
-        : 'Limited skills detected. Add core programming languages, frameworks, and tools.',
+        ? `Solid technical foundation (${totalExplicitSkillsCount} skills detected). Expanding role-specific frameworks or tools will strengthen ATS relevance.`
+        : 'Limited technical skills detected. Group skills into clear categories and highlight core role requirements.',
     itemsDetected: detected,
+    missing,
+    improvements,
   };
 }
 
 /**
  * 3. Projects Scorer (20%)
- * Evaluates project portfolio, project descriptions, technologies used, and outcomes.
+ * Evaluates project portfolio, titles, tech stack, descriptions, GitHub links, and metrics.
+ * Explicitly distinguishes "Project exists but GitHub link missing" from "No project evidence".
  */
 export function scoreProjects(resumeText: string = ''): ReadinessCategoryScore {
   const text = resumeText || '';
   const detected: string[] = [];
+  const missing: string[] = [];
+  const improvements: string[] = [];
   let score = 0;
 
-  // Projects section presence (30 pts)
+  // Section presence (30 pts)
   const hasProjectsSection = /(projects|academic projects|personal projects|key projects|capstone projects)/i.test(text);
   if (hasProjectsSection) {
     score += 30;
-    detected.push('Dedicated Projects Section');
+    detected.push('Dedicated Projects Section present');
   }
 
   // Estimate project entries count (up to 30 pts)
-  const projectSectionMatch = text.match(/(?:projects|academic projects|personal projects)[\s\S]*?(?:education|experience|skills|certifications|$)/i);
+  const projectSectionMatch = text.match(/(?:projects|academic projects|personal projects)[\s\S]*?(?:education|experience|skills|certifications|achievements|$)/i);
   const projectSnippet = projectSectionMatch ? projectSectionMatch[0] : text;
 
   const projectBulletMatches = projectSnippet.match(/(?:^|\n)\s*[•\-*]\s+([^\n]+)/g) || [];
-  const projectTitleMatches = projectSnippet.match(/(?:^|\n)([A-Z][A-Za-z0-9\s-]{3,35}(?:App|Dashboard|System|Platform|API|Tool|Bot|Engine|Website|Tracker|Manager|Portal|Hub))/g) || [];
+  const projectTitleMatches = projectSnippet.match(/(?:^|\n)\s*(?:\d+[\.\)]|[A-Z][A-Za-z0-9\s-]{3,35}(?:App|Dashboard|System|Platform|API|Tool|Bot|Engine|Website|Tracker|Manager|Portal|Hub|Detection))/g) || [];
 
   const estimatedProjects = Math.max(
     projectTitleMatches.length,
@@ -279,27 +414,56 @@ export function scoreProjects(resumeText: string = ''): ReadinessCategoryScore {
 
   if (hasProjectsSection && estimatedProjects >= 3) {
     score += 30;
-    detected.push(`Multi-project portfolio (${estimatedProjects}+ projects detected)`);
+    detected.push(`Multi-project portfolio (${estimatedProjects} projects identified)`);
   } else if (hasProjectsSection && estimatedProjects >= 2) {
     score += 25;
-    detected.push(`Multiple projects detected (${estimatedProjects} projects)`);
+    detected.push(`Multiple projects identified (${estimatedProjects} projects)`);
   } else if (hasProjectsSection || estimatedProjects >= 1) {
     score += 15;
     detected.push('At least 1 project demonstrated');
+  } else {
+    missing.push('Projects section / portfolio');
+    improvements.push('Add 2-3 technical projects demonstrating real implementation details and tech stack.');
+    return {
+      id: 'projects',
+      name: 'Projects',
+      score: 0,
+      weight: RECRUTER_WEIGHTS_SAFE(RECRUITER_READINESS_WEIGHTS.projects),
+      weightedScore: 0,
+      status: 'Needs Improvement',
+      summary: 'No project evidence detected in the resume.',
+      itemsDetected: ['No projects section found'],
+      missing,
+      improvements,
+    };
   }
 
-  // Tech stack explicitly linked with projects (up to 20 pts)
-  const techInProjects = /(tech stack|technologies|built with|developed with|using\s+[A-Za-z]+|react|node|python|sql|mongo|docker|flutter|express|django|flask)/i.test(projectSnippet);
+  // Tech stack explicitly detailed in projects (20 pts)
+  const techInProjects = /(tech stack|technologies|built with|developed with|using\s+[A-Za-z]+|react|node|python|sql|mongo|docker|flutter|express|django|flask|deep learning|xai|machine learning|html|css|javascript|java|c\b)/i.test(projectSnippet);
   if (techInProjects) {
     score += 20;
-    detected.push('Technologies & stack clearly detailed per project');
+    detected.push('Technologies & implementation details specified per project');
+  } else {
+    improvements.push('Specify tech stack used (e.g. React, Node.js, Python, MySQL) for each project.');
   }
 
-  // Measurable outcomes / GitHub links / Demos in projects (up to 20 pts)
-  const hasOutcomeOrLink = /(github\.com\/|demo|live|deployed|active users|reduced|improved|increased|\d+%)/i.test(projectSnippet);
-  if (hasOutcomeOrLink) {
-    score += 20;
-    detected.push('Includes project outcomes, metrics, or repository links');
+  // GitHub / Demo Links in projects (10 pts)
+  const hasRepoLink = /(github\.com\/[^\s]+|gitlab\.com\/[^\s]+|bitbucket\.org\/[^\s]+)/i.test(projectSnippet);
+  if (hasRepoLink) {
+    score += 10;
+    detected.push('GitHub / repository links included');
+  } else {
+    missing.push('GitHub / repository project links');
+    improvements.push('Add GitHub repository URLs to your listed projects to allow recruiters to inspect your source code.');
+  }
+
+  // Quantified project outcomes (10 pts)
+  const hasProjectMetrics = /\b\d+%\b|\$\d+|\d+x\b|reduced\s+[\w\s]+\s+by|improved\s+[\w\s]+\s+by|achieved\s+\d+/i.test(projectSnippet);
+  if (hasProjectMetrics) {
+    score += 10;
+    detected.push('Quantified project outcomes / metrics included');
+  } else {
+    improvements.push('Include measurable outcomes or performance metrics (e.g. % accuracy, latency, active users) in project descriptions.');
   }
 
   const clampedScore = Math.max(0, Math.min(100, Math.round(score)));
@@ -309,26 +473,30 @@ export function scoreProjects(resumeText: string = ''): ReadinessCategoryScore {
     id: 'projects',
     name: 'Projects',
     score: clampedScore,
-    weight: RECRUITER_READINESS_WEIGHTS.projects,
+    weight: RECRUTER_WEIGHTS_SAFE(RECRUITER_READINESS_WEIGHTS.projects),
     weightedScore: Math.round(clampedScore * RECRUITER_READINESS_WEIGHTS.projects * 10) / 10,
     status,
     summary:
       clampedScore >= 75
-        ? 'Impressive project portfolio demonstrating practical implementation and modern stack.'
+        ? 'Impressive project portfolio with clear technical details, implementation stack, and verified structure.'
         : clampedScore >= 50
-        ? 'Projects are listed, but could benefit from clearer stack callouts, metrics, or GitHub links.'
-        : 'Weak or missing projects. Recruiters prioritize candidates with tangible code projects.',
+        ? `Projects are present (${estimatedProjects} projects identified), but adding GitHub links or quantified metrics will elevate recruiter appeal.`
+        : 'Projects present but lack detailed tech stack descriptions or code repository links.',
     itemsDetected: detected,
+    missing,
+    improvements,
   };
 }
 
 /**
  * 4. Education Scorer (10%)
- * Evaluates degree, institution, academic details, and graduation timeline.
+ * Evaluates degree, field, academic institution, dates, and CGPA/GPA.
  */
 export function scoreEducation(resumeText: string = ''): ReadinessCategoryScore {
   const text = resumeText || '';
   const detected: string[] = [];
+  const missing: string[] = [];
+  const improvements: string[] = [];
   let score = 0;
 
   // Education section presence (35 pts)
@@ -343,20 +511,32 @@ export function scoreEducation(resumeText: string = ''): ReadinessCategoryScore 
   if (degreeMatch) {
     score += 30;
     detected.push(`Degree / Field Specified (${degreeMatch[0]})`);
+  } else {
+    missing.push('Degree / Field of study');
+    improvements.push('Explicitly state degree title (e.g. B.Tech in Computer Science).');
   }
 
-  // University / College / Institution (20 pts)
+  // Academic Institution (20 pts)
   const instituteMatch = text.match(/(university|college|institute|school|academy|campus|iit|nit|bits|iiit)/i);
   if (instituteMatch) {
     score += 20;
     detected.push(`Academic Institution Specified (${instituteMatch[0]})`);
+  } else {
+    missing.push('College / University name');
+    improvements.push('Add full college/university institution name.');
   }
 
-  // Academic Details: Graduation Year or GPA (15 pts)
+  // Timeline & CGPA (15 pts)
   const hasYearOrGPA = /(20\d\d|19\d\d|gpa|cgpa|\d\.\d\d?\/|percentage|\b\d{2}%\b)/i.test(text);
   if (hasYearOrGPA) {
     score += 15;
-    detected.push('Graduation Timeline / Academic Score Specified');
+    detected.push('Graduation Timeline / CGPA Specified');
+  } else {
+    missing.push('Graduation dates / CGPA');
+  }
+
+  if (detected.length === 0) {
+    detected.push('No education section found');
   }
 
   const clampedScore = Math.max(0, Math.min(100, Math.round(score)));
@@ -366,56 +546,84 @@ export function scoreEducation(resumeText: string = ''): ReadinessCategoryScore 
     id: 'education',
     name: 'Education',
     score: clampedScore,
-    weight: RECRUITER_READINESS_WEIGHTS.education,
+    weight: RECRUTER_WEIGHTS_SAFE(RECRUITER_READINESS_WEIGHTS.education),
     weightedScore: Math.round(clampedScore * RECRUITER_READINESS_WEIGHTS.education * 10) / 10,
     status,
     summary:
       clampedScore >= 75
         ? 'Complete educational credentials including degree, institution, and graduation timeline.'
         : clampedScore >= 50
-        ? 'Education section present, but missing institution name, graduation year, or major details.'
+        ? 'Education section present, but ensure degree title, college name, and dates are fully specified.'
         : 'Incomplete education details. Ensure degree, college name, and dates are clearly stated.',
     itemsDetected: detected,
+    missing,
+    improvements,
   };
 }
 
 /**
  * 5. Certifications Scorer (10%)
- * Evaluates industry certifications, recognized providers, and credentials.
+ * Only awards credit for certifications explicitly listed in the resume.
+ * Score = 0 if none are present.
  */
 export function scoreCertifications(resumeText: string = ''): ReadinessCategoryScore {
   const text = resumeText || '';
   const detected: string[] = [];
+  const missing: string[] = [];
+  const improvements: string[] = [];
   let score = 0;
 
-  // Section or mention presence (30 pts)
-  const hasCertSection = /(certificat|licensed|credentials?|accreditations?|courses? completed)/i.test(text);
+  // Check if explicit Certifications / Courses section exists
+  const hasCertSection = /(^|\n)\s*(certifications?|licensed\s+&\s+certifications?|credentials?|accreditations?|courses?\s+completed)\b/i.test(text);
+
+  // Industry-recognized certification credentials pattern (strictly exclude tools like Google Colab, VS Code)
+  const specificCertPatterns = [
+    { pattern: /\baws\s+(certified|certification|practitioner|architect|developer)\b/i, name: 'AWS' },
+    { pattern: /\bgoogle\s+(certified|cloud\s+certified|data\s+analytics\s+certificate)\b/i, name: 'Google' },
+    { pattern: /\bmeta\s+(certified|front-end\s+developer|back-end\s+developer)\b/i, name: 'Meta' },
+    { pattern: /\b(microsoft|azure)\s+(certified|certification)\b/i, name: 'Microsoft' },
+    { pattern: /\boracle\s+certified\b/i, name: 'Oracle' },
+    { pattern: /\bcisco\s+certified\b/i, name: 'Cisco' },
+    { pattern: /\bcomptia\b/i, name: 'CompTIA' },
+    { pattern: /\b(coursera|udemy|nptel|edx)\s+(certificate|specialization|coursework)\b/i, name: 'Online Course Credential' },
+  ];
+
+  const matchedProviders = specificCertPatterns.filter((p) => p.pattern.test(text)).map((p) => p.name);
+
+  let certItemCount = 0;
   if (hasCertSection) {
+    const certSnippetMatch = text.match(/(?:certifications?|credentials?)[\s\S]*?(?:education|experience|skills|projects|achievements|$)/i);
+    const certSnippet = certSnippetMatch ? certSnippetMatch[0] : '';
+    const bullets = certSnippet.match(/(?:^|\n)\s*[•\-*]\s+([^\n]+)/g) || [];
+    certItemCount = bullets.length;
+  }
+
+  const hasAnyCert = hasCertSection || matchedProviders.length > 0 || certItemCount > 0;
+
+  if (!hasAnyCert) {
+    score = 0;
+    detected.push('No certifications found');
+    missing.push('Industry certifications / verified coursework');
+    improvements.push('Consider adding relevant industry certifications or platform credentials (e.g., AWS, Meta, or domain coursework) as an optional boost.');
+  } else {
     score += 30;
     detected.push('Certifications / Credentials Mentioned');
-  }
 
-  // Industry-recognized providers (up to 40 pts)
-  const providers = ['aws', 'meta', 'google', 'microsoft', 'azure', 'oracle', 'coursera', 'udemy', 'nptel', 'edx', 'cisco', 'comptia', 'hackerrank', 'leetcode', 'freecodecamp'];
-  const matchedProviders = providers.filter((p) => new RegExp(`\\b${p}\\b`, 'i').test(text));
+    if (matchedProviders.length >= 2) {
+      score += 40;
+      detected.push(`Recognized Providers: ${Array.from(new Set(matchedProviders)).join(', ')}`);
+    } else if (matchedProviders.length === 1) {
+      score += 25;
+      detected.push(`Recognized Provider: ${matchedProviders[0]}`);
+    }
 
-  if (matchedProviders.length >= 2) {
-    score += 40;
-    detected.push(`Recognized Providers: ${matchedProviders.map((p) => p.toUpperCase()).join(', ')}`);
-  } else if (matchedProviders.length === 1) {
-    score += 25;
-    detected.push(`Recognized Provider: ${matchedProviders[0].toUpperCase()}`);
-  }
-
-  // Multiple or explicit certification titles (up to 30 pts)
-  const certKeywords = ['certified', 'certification', 'specialization', 'associate', 'professional certificate', 'fellow'];
-  const certHits = certKeywords.filter((k) => new RegExp(`\\b${k}\\b`, 'i').test(text)).length;
-  if (certHits >= 2 || matchedProviders.length >= 2) {
-    score += 30;
-    detected.push('Multiple verified credentials / specializations');
-  } else if (certHits >= 1 || matchedProviders.length >= 1) {
-    score += 15;
-    detected.push('Specialized coursework credential');
+    if (certItemCount >= 2 || matchedProviders.length >= 2) {
+      score += 30;
+      detected.push('Multiple verified credentials');
+    } else if (certItemCount >= 1 || matchedProviders.length >= 1) {
+      score += 15;
+      detected.push('Specialized coursework credential');
+    }
   }
 
   const clampedScore = Math.max(0, Math.min(100, Math.round(score)));
@@ -425,7 +633,7 @@ export function scoreCertifications(resumeText: string = ''): ReadinessCategoryS
     id: 'certifications',
     name: 'Certifications',
     score: clampedScore,
-    weight: RECRUITER_READINESS_WEIGHTS.certifications,
+    weight: RECRUTER_WEIGHTS_SAFE(RECRUITER_READINESS_WEIGHTS.certifications),
     weightedScore: Math.round(clampedScore * RECRUITER_READINESS_WEIGHTS.certifications * 10) / 10,
     status,
     summary:
@@ -433,25 +641,30 @@ export function scoreCertifications(resumeText: string = ''): ReadinessCategoryS
         ? 'Verified industry credentials and certifications demonstrating proactive learning.'
         : clampedScore >= 40
         ? 'Some coursework or certification mentioned, but recognized vendor credentials add weight.'
-        : 'No certifications detected. Adding industry certifications significantly boosts recruiter appeal.',
+        : 'No certifications were detected in the resume. Adding industry certifications is an optional boost.',
     itemsDetected: detected,
+    missing,
+    improvements,
   };
 }
 
 /**
  * 6. Experience / Internships Scorer (15%)
  * Evaluates work experience, internships, tenure, action verbs, and business impact.
+ * If experience exists but lacks metrics: states "Professional experience is present, but measurable outcomes could strengthen the section."
  */
 export function scoreExperience(resumeText: string = ''): ReadinessCategoryScore {
   const text = resumeText || '';
   const detected: string[] = [];
+  const missing: string[] = [];
+  const improvements: string[] = [];
   let score = 0;
 
   // Section presence (30 pts)
   const hasExpSection = /(experience|work experience|employment|internships?|work history|professional experience)/i.test(text);
   if (hasExpSection) {
     score += 30;
-    detected.push('Experience / Internship Section Present');
+    detected.push('Professional Experience Section Present');
   }
 
   // Dates & tenure presence (25 pts)
@@ -474,14 +687,27 @@ export function scoreExperience(resumeText: string = ''): ReadinessCategoryScore
     detected.push(`Active verbs used (${matchedVerbs.slice(0, 2).join(', ')})`);
   }
 
-  // Quantifiable business impact metrics (up to 20 pts)
-  const metricsCount = (text.match(/\d+%\b|\$\d+|\d+x\b|\b\d{2,}\b|\b\d+\+\b/g) || []).length;
-  if (metricsCount >= 3) {
+  // Quantifiable business impact metrics IN EXPERIENCE (EXCLUDING dates, years, CGPA, phone numbers)
+  const expSectionMatch = text.match(/(?:experience|work experience|employment|internships?)[\s\S]*?(?:education|projects|skills|certifications|achievements|$)/i);
+  const expSnippet = expSectionMatch ? expSectionMatch[0] : text;
+
+  const realMetricMatches = expSnippet.match(/\b\d+%\b|\$\d+|\d+x\b|reduced\s+[\w\s]+\s+by\s+\d+|improved\s+[\w\s]+\s+by\s+\d+|\b\d+\+\s*(users|clients|customers|requests|transactions)/gi) || [];
+
+  if (realMetricMatches.length >= 3) {
     score += 20;
-    detected.push(`Multiple quantifiable metrics & business outcomes (${metricsCount}+ metrics)`);
-  } else if (metricsCount >= 1) {
+    detected.push(`Multiple quantifiable impact metrics (${realMetricMatches.length}+ metrics)`);
+  } else if (realMetricMatches.length >= 1) {
     score += 10;
     detected.push('Includes quantified result');
+  } else if (hasExpSection) {
+    missing.push('Quantified business impact metrics');
+    improvements.push('Professional experience is present, but measurable outcomes (e.g. % improvements, efficiency gains, user adoption) could strengthen the section.');
+  }
+
+  if (detected.length === 0) {
+    detected.push('No experience section found');
+    missing.push('Work experience / Internship section');
+    improvements.push('Add internships, freelance projects, or academic roles with ownership details.');
   }
 
   const clampedScore = Math.max(0, Math.min(100, Math.round(score)));
@@ -491,49 +717,64 @@ export function scoreExperience(resumeText: string = ''): ReadinessCategoryScore
     id: 'experience',
     name: 'Experience / Internships',
     score: clampedScore,
-    weight: RECRUITER_READINESS_WEIGHTS.experience,
+    weight: RECRUTER_WEIGHTS_SAFE(RECRUITER_READINESS_WEIGHTS.experience),
     weightedScore: Math.round(clampedScore * RECRUITER_READINESS_WEIGHTS.experience * 10) / 10,
     status,
     summary:
       clampedScore >= 75
         ? 'Well-documented internship or work history with decisive action verbs and quantified impact.'
         : clampedScore >= 50
-        ? 'Experience is present, but could be elevated with more quantifiable metrics and results.'
+        ? 'Professional experience is present, but measurable outcomes could strengthen the section.'
         : 'Minimal or no experience listed. Add internships, freelance projects, or academic roles.',
     itemsDetected: detected,
+    missing,
+    improvements,
   };
 }
 
 /**
  * 7. Achievements Scorer (5%)
- * Evaluates awards, honors, hackathons (e.g. Smart India Hackathon), competitions, and recognitions.
+ * Only awards credit for explicitly listed awards, hackathons, coding competitions, scholarships, publications.
+ * Score = 0 if none present.
  */
 export function scoreAchievements(resumeText: string = ''): ReadinessCategoryScore {
   const text = resumeText || '';
   const detected: string[] = [];
+  const missing: string[] = [];
+  const improvements: string[] = [];
   let score = 0;
 
-  // Recognition / Hackathons keywords (40 pts)
-  const hasAchSection = /(achievements?|awards?|honors?|hackathons?|smart india hackathon|sih|competitions?|olympiad|scholarships?|fellowships?)/i.test(text);
-  if (hasAchSection) {
-    score += 40;
-    detected.push('Achievements / Honors / Hackathons Documented');
-  }
+  // Check if explicit Achievements / Awards / Hackathons section exists
+  const hasAchSection = /(^|\n)\s*(achievements?|awards?|honors?|hackathons?|smart\s+india\s+hackathon|\bsih\b|competitions?|olympiad|scholarships?|fellowships?)\b/i.test(text);
 
-  // Standing / Placement details (up to 35 pts)
-  const standingMatch = text.match(/(1st|2nd|3rd|first place|second place|winner|runner-?up|finalist|top \d+%|rank \d+|semifinalist|selected|gold medalist|dean's list)/i);
-  if (standingMatch) {
-    score += 35;
-    detected.push(`Demonstrated Standing: "${standingMatch[0]}"`);
-  } else if (hasAchSection) {
-    score += 15;
-  }
+  // Check standing / placement details in explicit context (strictly excluding generic "selected")
+  const standingMatch = text.match(/(1st|2nd|3rd|first place|second place|winner|runner-?up|finalist|gold medalist|top \d+%|rank \d+|dean's list)/i);
+  
+  // Competitive programming / hackathon context
+  const competitiveMatch = text.match(/(hackathon|smart india hackathon|\bsih\b|codeforces|leetcode|codechef|kaggle|olympiad|paper publication|patent)/i);
 
-  // Event or Competitive Programming context (up to 25 pts)
-  const competitiveMatch = text.match(/(hackathon|sih|smart india hackathon|codeforces|leetcode|codechef|kaggle|conference|paper|publication|patent)/i);
-  if (competitiveMatch) {
-    score += 25;
-    detected.push(`Competitive context: ${competitiveMatch[0]}`);
+  const hasAnyAchievement = hasAchSection || standingMatch || competitiveMatch;
+
+  if (!hasAnyAchievement) {
+    score = 0;
+    detected.push('No achievements found');
+    missing.push('Competitive achievements / Awards / Hackathons');
+    improvements.push('Participate in hackathons (e.g. Smart India Hackathon), technical competitions, or open-source initiatives to build achievement proof.');
+  } else {
+    if (hasAchSection) {
+      score += 40;
+      detected.push('Achievements / Honors Documented');
+    }
+    if (standingMatch) {
+      score += 35;
+      detected.push(`Demonstrated Standing: "${standingMatch[0]}"`);
+    } else if (hasAchSection) {
+      score += 15;
+    }
+    if (competitiveMatch) {
+      score += 25;
+      detected.push(`Competitive context: ${competitiveMatch[0]}`);
+    }
   }
 
   const clampedScore = Math.max(0, Math.min(100, Math.round(score)));
@@ -543,7 +784,7 @@ export function scoreAchievements(resumeText: string = ''): ReadinessCategorySco
     id: 'achievements',
     name: 'Achievements',
     score: clampedScore,
-    weight: RECRUITER_READINESS_WEIGHTS.achievements,
+    weight: RECRUTER_WEIGHTS_SAFE(RECRUITER_READINESS_WEIGHTS.achievements),
     weightedScore: Math.round(clampedScore * RECRUITER_READINESS_WEIGHTS.achievements * 10) / 10,
     status,
     summary:
@@ -551,23 +792,27 @@ export function scoreAchievements(resumeText: string = ''): ReadinessCategorySco
         ? 'Excellent competitive achievements, awards, or hackathon recognitions that catch recruiter attention.'
         : clampedScore >= 40
         ? 'Some achievements or activities present; highlight competitive standings or awards if available.'
-        : 'No achievements listed. Participating in hackathons (e.g., SIH) or competitions creates standout appeal.',
+        : 'No achievements listed in resume. Participating in hackathons (e.g. SIH) or competitions creates standout appeal.',
     itemsDetected: detected,
+    missing,
+    improvements,
   };
 }
 
 /**
- * Main Deterministic Recruiter Readiness Calculator
+ * Main Master-Prompt Compliant Recruiter Readiness Calculator
  *
  * Formula:
  * Overall Score = Σ(Category Score × Category Weight)
  * Clamped strictly to [0, 100], rounded to whole integer.
  */
-export function computeRecruiterReadiness(data: StudentInputData): RecruiterReadinessResult {
-  const resumeText = data.resumeText || '';
-  const candidateName = data.candidateName || '';
-  const skillsFound = data.skillsFound || [];
-  const missingSkills = data.missingSkills || [];
+export function computeRecruiterReadiness(data?: StudentInputData | null): RecruiterReadinessResult {
+  const safeData = data || { resumeText: '' };
+  const resumeText = typeof safeData.resumeText === 'string' ? safeData.resumeText : '';
+  const candidateName = typeof safeData.candidateName === 'string' ? safeData.candidateName : '';
+  const skillsFound = Array.isArray(safeData.skillsFound) ? safeData.skillsFound : [];
+  const missingSkills = Array.isArray(safeData.missingSkills) ? safeData.missingSkills : [];
+  const targetRole = typeof safeData.targetRole === 'string' && safeData.targetRole.trim().length > 0 ? safeData.targetRole.trim() : 'Full Stack Software Engineer';
 
   // 1. Calculate each category deterministically
   const catProfile = scoreProfileResume(resumeText, candidateName);
@@ -588,9 +833,13 @@ export function computeRecruiterReadiness(data: StudentInputData): RecruiterRead
     catAchievements,
   ];
 
-  // 2. Weighted Overall Score calculation
-  const weightedSum = categories.reduce((sum, cat) => sum + cat.score * cat.weight, 0);
-  const overallScore = Math.max(0, Math.min(100, Math.round(weightedSum)));
+  // 2. Weighted Overall Score calculation with strict safety
+  const weightedSum = categories.reduce((sum, cat) => {
+    const s = typeof cat.score === 'number' && !isNaN(cat.score) && isFinite(cat.score) ? cat.score : 0;
+    const w = typeof cat.weight === 'number' && !isNaN(cat.weight) && isFinite(cat.weight) ? cat.weight : 0;
+    return sum + s * w;
+  }, 0);
+  const overallScore = Math.max(0, Math.min(100, isNaN(weightedSum) || !isFinite(weightedSum) ? 0 : Math.round(weightedSum)));
 
   // 3. Readiness Level classification
   let readinessLevel: RecruiterReadinessLevel = 'Early Preparation';
@@ -627,12 +876,13 @@ export function computeRecruiterReadiness(data: StudentInputData): RecruiterRead
     };
   }
 
-  // 4. Strengths Generation (ONLY categories where score >= 70 AND actual items detected)
+  // 4. Genuine Strengths Generation (ONLY categories where score >= 70 AND actual positive items detected)
   const strengths: string[] = [];
   for (const cat of categories) {
-    if (cat.score >= 70 && cat.itemsDetected.length > 0) {
+    const hasPositiveItems = cat.itemsDetected.some((item) => !/^no\b/i.test(item));
+    if (cat.score >= 70 && hasPositiveItems) {
       if (cat.id === 'profileResume') {
-        strengths.push('Complete and professional profile with verified contact details and clear summary.');
+        strengths.push('Complete and professional profile with verified contact details and clear objective/summary.');
       } else if (cat.id === 'skills') {
         strengths.push(`Strong skill coverage with ${cat.itemsDetected[0] || 'multiple technical proficiencies'}.`);
       } else if (cat.id === 'projects') {
@@ -657,56 +907,100 @@ export function computeRecruiterReadiness(data: StudentInputData): RecruiterRead
     }
   }
 
-  // 5. Areas to Improve Generation (categories where score < 70)
+  // 5. Genuine Areas to Improve Generation (categories where score < 70)
   const areasToImprove: string[] = [];
   for (const cat of categories) {
     if (cat.score < 70) {
       if (cat.id === 'profileResume') {
-        areasToImprove.push('Add missing contact links (LinkedIn, GitHub) and a crisp career summary to the profile.');
+        const hasLinkedIn = cat.itemsDetected.some((i) => /linkedin/i.test(i));
+        if (hasLinkedIn) {
+          areasToImprove.push('LinkedIn is present. Add GitHub or portfolio links to showcase repository code.');
+        } else {
+          areasToImprove.push('Add missing contact links (LinkedIn, GitHub) and a crisp career summary to the profile.');
+        }
       } else if (cat.id === 'skills') {
-        areasToImprove.push('Expand technical skills and categorize them into Languages, Frameworks, and Tools.');
+        areasToImprove.push(`Expand technical skills matching ${targetRole} requirements and categorize them into Languages, Frameworks, Databases, and Tools.`);
       } else if (cat.id === 'projects') {
-        areasToImprove.push('Add detailed project descriptions, technologies used, and measurable outcomes or GitHub links.');
+        const hasRepo = cat.itemsDetected.some((i) => /repository|github/i.test(i));
+        if (!hasRepo) {
+          areasToImprove.push('Projects exist but GitHub links are missing. Add repository URLs to demonstrate implementation.');
+        } else {
+          areasToImprove.push('Add detailed project descriptions, technologies used, and measurable outcomes.');
+        }
       } else if (cat.id === 'education') {
         areasToImprove.push('Specify degree major, institution/college name, and graduation timeline.');
       } else if (cat.id === 'certifications') {
-        areasToImprove.push('Acquire and showcase recognized vendor or platform certifications (AWS, Meta, Coursera, etc.).');
+        areasToImprove.push('No certifications were detected. Acquire and showcase recognized vendor or platform certifications as an optional boost.');
       } else if (cat.id === 'experience') {
-        areasToImprove.push('Add internship or practical experience details with quantifiable impact metrics.');
+        const hasMetrics = cat.itemsDetected.some((i) => /quantified|metrics/i.test(i));
+        if (!hasMetrics && catExperience.score > 0) {
+          areasToImprove.push('Professional experience is present, but measurable outcomes (e.g. % improvements, efficiency gains) could strengthen the section.');
+        } else {
+          areasToImprove.push('Add internship or practical experience details with quantifiable impact metrics.');
+        }
       } else if (cat.id === 'achievements') {
-        areasToImprove.push('Participate in hackathons (e.g. Smart India Hackathon) or coding competitions to build achievement proof.');
+        areasToImprove.push('No achievements detected. Participate in hackathons (e.g. Smart India Hackathon) or coding competitions to build proof.');
       }
     }
   }
 
-  // 6. Actionable Personalized Recommendations (targeted specifically to weak categories)
-  const recommendations: string[] = [];
-  if (catProjects.score < 70) {
-    recommendations.push('Add project descriptions, technologies used, and outcomes (e.g., GitHub links, user adoption, performance metrics).');
-  }
-  if (catCertifications.score < 70) {
-    recommendations.push('Add relevant industry certifications to your profile (e.g., AWS, Meta, or domain coursework credentials).');
-  }
-  if (catExperience.score < 70) {
-    recommendations.push('Add internship or practical experience details if available, highlighting key ownership verbs and outcomes.');
-  }
-  if (catProfile.score < 70) {
-    recommendations.push('Complete missing profile information including LinkedIn, GitHub URLs, and a focused 2-3 sentence executive summary.');
-  }
-  if (catSkills.score < 70) {
-    recommendations.push('Highlight modern frameworks and tools matching your target role, grouping them into distinct categories.');
-  }
-  if (catEducation.score < 70) {
-    recommendations.push('Ensure complete educational details including degree name, college/university, and graduation dates.');
-  }
-  if (catAchievements.score < 70) {
-    recommendations.push('Participate in hackathons (such as Smart India Hackathon), technical competitions, or open-source initiatives to build achievements.');
+  // 6. EXACTLY 6 Tailored Actionable Recommendations (Prioritized by Impact)
+  const recList: string[] = [];
+
+  // Rec 1: Highest Impact Profile / Summary
+  const hasLinkedIn = catProfile.itemsDetected.some((i) => /linkedin/i.test(i));
+  const hasObjective = catProfile.itemsDetected.some((i) => /objective/i.test(i));
+  if (hasObjective && !catProfile.itemsDetected.some((i) => /summary section/i.test(i))) {
+    recList.push(`Replace the generic objective with a 2–3 sentence ${targetRole} professional summary highlighting your key technical skills and project experience.`);
+  } else if (!hasLinkedIn) {
+    recList.push('Add a hyperlinked LinkedIn profile URL to your resume top header for instant recruiter verification.');
+  } else {
+    recList.push(`Refine your top header and summary to highlight relevant keywords for ${targetRole} openings.`);
   }
 
-  // If candidate is already strong across all categories, give polish advice
-  if (recommendations.length === 0) {
-    recommendations.push('Keep your profile updated with recent project releases and ensure your GitHub repositories have clean READMEs.');
+  // Rec 2: Skills Improvement
+  if (missingSkills.length > 0) {
+    recList.push(`Incorporate key target role skills (${missingSkills.slice(0, 3).map((m) => m.skill).join(', ')}) into your skills and project descriptions.`);
+  } else {
+    recList.push('Group your technical skills into clear categories (Programming Languages, Frameworks, Databases, Tools) to optimize ATS ingestion.');
   }
+
+  // Rec 3: Project Improvement
+  const hasRepoLink = catProjects.itemsDetected.some((i) => /repository|github/i.test(i));
+  if (!hasRepoLink && catProjects.score > 0) {
+    recList.push('Add GitHub repository links to your listed projects to allow recruiters to inspect your source code.');
+  } else if (catProjects.score === 0) {
+    recList.push('Add 2-3 technical projects demonstrating practical implementation details, tech stack, and GitHub URLs.');
+  } else {
+    recList.push('Include quantifiable performance metrics (e.g., % accuracy gains, reduced latency) in project bullet points.');
+  }
+
+  // Rec 4: Experience / Metrics Improvement
+  const hasExpMetrics = catExperience.itemsDetected.some((i) => /quantified|metrics/i.test(i));
+  if (!hasExpMetrics && catExperience.score > 0) {
+    recList.push('Professional experience is present; add measurable outcomes (e.g., % efficiency gains, user adoption, throughput) to your work experience bullets.');
+  } else if (catExperience.score === 0) {
+    recList.push('Add internship or practical experience details highlighting key ownership action verbs and technical deliverables.');
+  } else {
+    recList.push('Strengthen bullet points using Google’s XYZ formula: "Accomplished [X] as measured by [Y], by doing [Z]".');
+  }
+
+  // Rec 5: Certification Improvement
+  if (catCertifications.score === 0) {
+    recList.push('No certifications were detected; consider completing relevant industry certifications or verified courses (e.g. AWS, Meta, or domain coursework) as an optional boost.');
+  } else {
+    recList.push('Highlight vendor-recognized certification badges (e.g., AWS, Meta, Microsoft) at the top of your resume.');
+  }
+
+  // Rec 6: Achievement / Portfolio Improvement
+  if (catAchievements.score === 0) {
+    recList.push('Participate in hackathons (such as Smart India Hackathon), technical competitions, or open-source initiatives to build verified achievement proof.');
+  } else {
+    recList.push('Quantify your competitive standings (e.g., 1st Place, Top 5% finalist) prominently in your Achievements section.');
+  }
+
+  // Ensure exactly 6 recommendations
+  const finalRecommendations = recList.slice(0, 6);
 
   // 7. Transparent Calculation Explanation
   const explanation = {
@@ -727,7 +1021,7 @@ export function computeRecruiterReadiness(data: StudentInputData): RecruiterRead
     categories,
     strengths,
     areasToImprove,
-    recommendations,
+    recommendations: finalRecommendations,
     explanation,
   };
 }

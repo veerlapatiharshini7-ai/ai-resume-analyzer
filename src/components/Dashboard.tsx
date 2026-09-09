@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AnalysisResult } from '../types';
 import { CircularScore } from './CircularScore';
+import { ProgressBar } from './ProgressBar';
 import { downloadReportPDF } from '../utils/exportPdf';
 import { computeRecruiterReadiness, RecruiterReadinessResult } from '../utils/recruiterReadiness';
 import { RecruiterReadinessView } from './RecruiterReadinessView';
@@ -393,19 +394,21 @@ ${readiness.recommendations.map((r) => `• ${r}`).join('\n')}
                 </div>
 
                 {/* Top Category Preview Bars */}
-                <div className="space-y-2 pt-2 border-t border-slate-700/60 text-xs">
+                <div className="space-y-2.5 pt-2 border-t border-slate-700/60 text-xs">
                   {readiness.categories.slice(0, 3).map((cat) => (
                     <div key={cat.id} className="space-y-1">
                       <div className="flex justify-between text-[11px] font-semibold text-slate-300">
                         <span>{cat.name} ({Math.round(cat.weight * 100)}%)</span>
                         <span className="font-mono">{cat.score}%</span>
                       </div>
-                      <div className="w-full bg-slate-700 rounded-full h-1.5 overflow-hidden">
-                        <div
-                          className={`h-1.5 rounded-full ${cat.score >= 75 ? 'bg-emerald-400' : cat.score >= 50 ? 'bg-blue-400' : 'bg-amber-400'}`}
-                          style={{ width: `${cat.score}%` }}
-                        />
-                      </div>
+                      <ProgressBar
+                        value={cat.score}
+                        max={100}
+                        label={`${cat.name} score`}
+                        status={cat.status}
+                        size="sm"
+                        showLabel={false}
+                      />
                     </div>
                   ))}
                 </div>

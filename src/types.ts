@@ -112,4 +112,3 @@ export interface SampleResume {
   fileName: string;
   text: string;
 }
-

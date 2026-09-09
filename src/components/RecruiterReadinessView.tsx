@@ -1,6 +1,7 @@
 import React from 'react';
 import { RecruiterReadinessResult } from '../utils/recruiterReadiness';
 import { CircularScore } from './CircularScore';
+import { ProgressBar } from './ProgressBar';
 import {
   CheckCircle2,
   AlertTriangle,
@@ -74,12 +75,6 @@ export const RecruiterReadinessView: React.FC<RecruiterReadinessViewProps> = ({
     );
   };
 
-  const getProgressBarColor = (score: number) => {
-    if (score >= 75) return 'bg-emerald-500';
-    if (score >= 50) return 'bg-blue-600';
-    return 'bg-amber-500';
-  };
-
   return (
     <div className="space-y-6">
       {/* Top Prominent Overall Score Card */}
@@ -119,6 +114,18 @@ export const RecruiterReadinessView: React.FC<RecruiterReadinessViewProps> = ({
               <span className="text-lg sm:text-xl font-bold text-slate-700 dark:text-slate-300">
                 • {readiness.readinessLevel}
               </span>
+            </div>
+
+            {/* Prominent Overall Visual Progress Bar */}
+            <div className="pt-1 max-w-xl">
+              <ProgressBar
+                value={readiness.overallScore}
+                max={100}
+                label="Recruiter Readiness Progress"
+                status={readiness.readinessLevel}
+                size="lg"
+                showLabel={true}
+              />
             </div>
 
             <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed max-w-2xl">
@@ -164,7 +171,7 @@ export const RecruiterReadinessView: React.FC<RecruiterReadinessViewProps> = ({
         </div>
       </div>
 
-      {/* ─── NEW: Score Breakdown Section ─── */}
+      {/* ─── Score Breakdown Section ─── */}
       <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
         {/* Section Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-700/60 gap-2 bg-slate-50/50 dark:bg-slate-900/40">
@@ -198,36 +205,20 @@ export const RecruiterReadinessView: React.FC<RecruiterReadinessViewProps> = ({
         {/* Breakdown Rows */}
         <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
           {readiness.categories.map((cat, idx) => {
-            // contribution = score × weight (weightedScore already holds this, rounded to 1dp)
             const contribution = cat.weightedScore;
-            // contribution share of overall (visual bar width within the row)
-            const barPct = Math.max(0, Math.min(100, cat.score));
-            // Contribution bar width relative to its weight ceiling
-            const contributionBarPct = cat.weight > 0
-              ? Math.max(0, Math.min(100, Math.round((contribution / (cat.weight * 100)) * 100)))
-              : 0;
 
             const getRowAccent = (status: 'Strong' | 'Moderate' | 'Needs Improvement') => {
               if (status === 'Strong') return {
                 scoreBg: 'bg-emerald-50 dark:bg-emerald-950/30',
                 scoreText: 'text-emerald-700 dark:text-emerald-300',
-                bar: 'bg-emerald-500',
-                contribBar: 'bg-emerald-400/60',
-                badge: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60',
               };
               if (status === 'Moderate') return {
                 scoreBg: 'bg-blue-50 dark:bg-blue-950/30',
                 scoreText: 'text-blue-700 dark:text-blue-300',
-                bar: 'bg-blue-500',
-                contribBar: 'bg-blue-400/60',
-                badge: 'bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300 border-blue-200 dark:border-blue-800/60',
               };
               return {
                 scoreBg: 'bg-amber-50 dark:bg-amber-950/30',
                 scoreText: 'text-amber-700 dark:text-amber-300',
-                bar: 'bg-amber-500',
-                contribBar: 'bg-amber-400/60',
-                badge: 'bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border-amber-200 dark:border-amber-800/60',
               };
             };
 
@@ -258,22 +249,16 @@ export const RecruiterReadinessView: React.FC<RecruiterReadinessViewProps> = ({
                   </div>
                 </div>
 
-                {/* Score bar + value */}
-                <div className="flex-1 min-w-0 space-y-1.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 tracking-wide">
-                      Score
-                    </span>
-                    <span className={`text-xs font-black ${accent.scoreText} tabular-nums`}>
-                      {cat.score}&thinsp;<span className="font-semibold text-slate-400">/100</span>
-                    </span>
-                  </div>
-                  <div className="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
-                    <div
-                      className={`${accent.bar} h-2 rounded-full transition-all duration-1000`}
-                      style={{ width: `${barPct}%` }}
-                    />
-                  </div>
+                {/* Visual Progress Indicator Bar */}
+                <div className="flex-1 min-w-0">
+                  <ProgressBar
+                    value={cat.score}
+                    max={100}
+                    label={`${cat.name} Score`}
+                    status={cat.status}
+                    size="md"
+                    showLabel={true}
+                  />
                 </div>
 
                 {/* Contribution */}
@@ -367,11 +352,15 @@ export const RecruiterReadinessView: React.FC<RecruiterReadinessViewProps> = ({
                   </div>
                 </div>
 
-                {/* Progress Bar */}
-                <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2 overflow-hidden my-2">
-                  <div
-                    className={`${getProgressBarColor(cat.score)} h-2 rounded-full transition-all duration-1000`}
-                    style={{ width: `${cat.score}%` }}
+                {/* Progress Bar Component */}
+                <div className="my-2">
+                  <ProgressBar
+                    value={cat.score}
+                    max={100}
+                    label={`${cat.name} progress`}
+                    status={cat.status}
+                    size="sm"
+                    showLabel={false}
                   />
                 </div>
 
@@ -388,15 +377,26 @@ export const RecruiterReadinessView: React.FC<RecruiterReadinessViewProps> = ({
                     Verified Evidence:
                   </span>
                   <div className="flex flex-wrap gap-1">
-                    {cat.itemsDetected.map((item, idx) => (
-                      <span
-                        key={idx}
-                        className="text-[11px] font-semibold px-2 py-0.5 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 flex items-center gap-1"
-                      >
-                        <Check className="w-3 h-3 text-emerald-500 shrink-0" />
-                        <span>{item}</span>
-                      </span>
-                    ))}
+                    {cat.itemsDetected.map((item, idx) => {
+                      const isNegative = /^no\b/i.test(item);
+                      return (
+                        <span
+                          key={idx}
+                          className={`text-[11px] font-semibold px-2 py-0.5 rounded border flex items-center gap-1 ${
+                            isNegative
+                              ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800/60 text-amber-800 dark:text-amber-300'
+                              : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          {isNegative ? (
+                            <AlertTriangle className="w-3 h-3 text-amber-500 shrink-0" />
+                          ) : (
+                            <Check className="w-3 h-3 text-emerald-500 shrink-0" />
+                          )}
+                          <span>{item}</span>
+                        </span>
+                      );
+                    })}
                   </div>
                 </div>
               )}

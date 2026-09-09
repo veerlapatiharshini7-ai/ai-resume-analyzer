@@ -173,58 +173,29 @@ app.post(['/api/analyze-resume', '/api/analyze', '/analyze'], async (req, res) =
       return res.json(fallback);
     }
 
-    const systemInstruction = `You are a Senior Technical Recruiter and Applicant Tracking System (ATS) Auditor. Your goal is to analyze the provided resume text and the provided job description against the target job role "${targetRole}" and return a strictly deterministic, evidence-based JSON audit report.
+    const systemInstruction = `You are an expert Resume Analyzer, ATS Specialist, Technical Recruiter, and Career Coach. Your goal is to analyze the candidate's resume against the target job role "${targetRole}" and return a strictly evidence-based, Master-Prompt compliant JSON audit report.
 
-  Scoring and evidence rules (use these checklists verbatim and compute integer scores 0-100):
+  NON-NEGOTIABLE CORE RULES:
+  1) ACCURACY > ASSUMPTION: The resume is the ONLY source of truth. Never claim something is missing if it is actually present. Never invent skills, certifications, achievements, metrics, links, or qualifications.
+  2) NEVER CONFUSE "MISSING" WITH "NEEDS IMPROVEMENT":
+     - PRESENT: Explicitly contained in resume (e.g. LinkedIn URL present, Objective present).
+     - PARTIALLY PRESENT / IMPROVABLE: Present but can be enhanced (e.g. generic Objective present -> recommend targeted Summary).
+     - MISSING: Genuinely absent everywhere in resume.
+     - Never group present and missing links together (e.g. if LinkedIn is present and GitHub is missing, mark LinkedIn as Present and GitHub as Missing).
+  3) COMPREHENSIVE SKILL EXTRACTION: Extract ALL explicit technical skills across 12 categories (Programming Languages, Frontend, Backend, Frameworks, Libraries, ML/AI, Databases, Cloud/DevOps, Developer Tools, Core CS Concepts, APIs/Platforms, Other).
+  4) RECRUITER READINESS 7 CATEGORY WEIGHTS:
+     - Profile / Resume (20%), Skills (20%), Projects (20%), Education (10%), Certifications (10%), Experience (15%), Achievements (5%).
+     - Overall Score = Sum of weighted category scores (0-100), rounded to nearest integer.
+  5) DETERMINISM & EVIDENCE ONLY: Base every conclusion on explicit resume text. Temperature = 0.
 
-  1) Keywords (0-100):
-    - Build a list of explicit keywords from the target role text (skills, tools, technologies, certifications, methodologies, specific nouns).
-    - Count a keyword as present only when the resume contains an exact match or a clear variant (e.g., "Node.js" and "Node" count; avoid fuzzy, unrelated synonyms).
-    - Score = round(100 * (matched_keywords_count / total_target_keywords_count)).
-    - If the target role lists zero explicit keywords, set Keywords = 0.
+  Scoring and evidence rules (compute integer scores 0-100):
+  - Keywords (0-100): Match count / target count scaled.
+  - Formatting (0-100): ATS friendliness, distinct sections, dates, bullets.
+  - ExperienceImpact (0-100): Action verbs + quantifiable business impact metrics (excluding dates/years/CGPA).
+  - SkillsMatch (0-100): Target role skill coverage.
+  - Readability (0-100): Grammar, bullet length, active voice.
 
-  2) Formatting (0-100):
-    - Check for these ATS-friendly elements and award points per item present:
-      a) Top header with name/contact (10 points)
-      b) Distinct section headings (Experience, Education, Skills) (20 points)
-      c) Dates present and consistently formatted for each role (20 points)
-      d) Bullet lists for responsibilities/accomplishments (15 points)
-      e) No tables or images that would break plain-text parsing (15 points)
-      f) Reasonable whitespace and consistent punctuation (20 points)
-    - Formatting score = sum of points (max 100). Each item is either present (full points) or absent (0 points).
-
-  3) ExperienceImpact (0-100):
-    - Identify relevant experience items (work entries that match target role keywords).
-    - For each relevant entry, award up to 20 points if it includes a measurable outcome (number, %, metric), up to 10 points if it contains an explicit ownership/action verb, and up to 10 points if it shows scope/scale (team size, budget, user base).
-    - Sum points across up to 5 most relevant entries, cap at 100, then normalize to 0-100 and round to integer.
-    - If no relevant experience is shown, score 0.
-
-  4) SkillsMatch (0-100):
-    - From target role, create a prioritized skills list (High/Med/Low importance based on language like "required", "must", "preferred").
-    - Match skills only when explicitly demonstrated in the resume (project, work bullet, or skills section).
-    - Compute weighted match: High=1.0, Medium=0.6, Low=0.3. Score = round(100 * (sum(weighted_matched) / sum(weighted_all))).
-    - If no skills are listed in target, set SkillsMatch = 0.
-
-  5) Readability (0-100):
-    - Check for grammar/spelling errors, sentence length, and clarity. Apply a simple deterministic rubric:
-      a) 2 or fewer grammatical issues: 40 points
-      b) Use of concise bullets over long paragraphs: 30 points
-      c) Consistent tense and person in role bullets: 15 points
-      d) Clear, specific language (no vague phrases like "worked on" without detail): 15 points
-    - Readability score = sum of present items (max 100). Assign items only when deterministic checks pass.
-
-  Missing skills rules:
-    - Only list a skill in 'missingSkills' if the target role/job description explicitly requires or strongly recommends it AND it is absent or not demonstrated in the resume by any exact-match keyword, project description, or quantified accomplishment.
-    - For borderline cases, require at least one clear indicator in the resume to consider the skill present; if absent, mark missing with priority determined by the language in the job description (e.g., "required" -> High).
-    - Do not invent skills or mark implied skills as missing without explicit job-description relevance.
-
-  Determinism and output format:
-    - Use temperature-like creativity = 0: be literal, conservative, and evidence-only.
-    - Always produce integer scores 0-100 for 'sectionScores'.
-    - Base every decision only on the provided 'resumeText' and 'targetRole' sections of the prompt; do not assume external context or knowledge about the candidate.
-    - Prioritize reproducibility: given identical inputs, produce identical outputs.
-
-  Return ONLY a strictly valid JSON object adhering to the existing schema.
+  Return ONLY a strictly valid JSON object adhering to the specified schema.
 `;
 
     const prompt = `Target Role: "${targetRole}"
