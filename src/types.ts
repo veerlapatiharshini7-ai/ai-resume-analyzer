@@ -65,6 +65,7 @@ export interface AnalysisResult {
   suitableJobRoles: JobRoleMatch[];
   sectionScores: SectionScores;
   analyzedAt: string;
+  usedFallback?: boolean;
 }
 
 export interface SampleResume {
@@ -73,6 +74,27 @@ export interface SampleResume {
   role: string;
   fileName: string;
   text: string;
+}
+
+export type CoverLetterTone = 'Professional' | 'Confident' | 'Friendly' | 'Formal';
+
+export interface CoverLetterRequest {
+  resumeText: string;
+  targetRole: string;
+  companyName?: string;
+  jobDescription?: string;
+  tone?: CoverLetterTone;
+}
+
+export interface CoverLetterResponse {
+  coverLetter: string;
+  candidateName?: string;
+  targetRole?: string;
+  companyName?: string;
+  tone?: CoverLetterTone;
+  wordCount?: number;
+  usedFallback?: boolean;
+  generatedAt?: string;
 }
 
 export interface ResumeHistoryItem {

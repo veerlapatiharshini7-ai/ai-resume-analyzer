@@ -29,9 +29,10 @@ import {
 interface DashboardProps {
   result: AnalysisResult;
   onReset: () => void;
+  onWriteCoverLetter?: () => void;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ result, onReset }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ result, onReset, onWriteCoverLetter }) => {
   const [activeTab, setActiveTab] = useState<'bento' | 'skills' | 'grammar' | 'roadmap' | 'jobs'>('bento');
   const [isExporting, setIsExporting] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -97,6 +98,18 @@ ${result.improvementTips.map((t) => `• [${t.section}] ${t.tip}`).join('\n')}
             {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
             <span>{copied ? 'Copied' : 'Copy Summary'}</span>
           </button>
+
+          {onWriteCoverLetter && (
+            <button
+              type="button"
+              id="dashboard-write-cover-letter-btn"
+              onClick={onWriteCoverLetter}
+              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-all active:scale-[0.98] cursor-pointer"
+            >
+              <Wand2 className="w-4 h-4" />
+              <span>Write Cover Letter</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -362,16 +375,29 @@ ${result.improvementTips.map((t) => `• [${t.section}] ${t.tip}`).join('\n')}
                   {result.candidateName}_Resume.pdf
                 </p>
                 <p className="text-xs text-slate-400">
-                  Processed via Gemini 3.6 Flash AI Engine
+                  {result.usedFallback
+                    ? 'Processed via Deterministic ATS Engine'
+                    : 'Processed via Gemini 2.5 Flash AI Engine'}
                 </p>
               </div>
 
               <div className="space-y-2">
+                {onWriteCoverLetter && (
+                  <button
+                    type="button"
+                    onClick={onWriteCoverLetter}
+                    className="w-full py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white rounded-lg text-xs font-bold tracking-wider uppercase transition-colors shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Wand2 className="w-4 h-4" />
+                    <span>Generate Cover Letter</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={handleExportPDF}
                   disabled={isExporting}
-                  className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold tracking-wider uppercase transition-colors shadow-sm flex items-center justify-center gap-2"
+                  className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold tracking-wider uppercase transition-colors shadow-sm flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Download className="w-4 h-4" />
                   <span>{isExporting ? 'Generating...' : 'Download Full PDF'}</span>
@@ -380,7 +406,7 @@ ${result.improvementTips.map((t) => `• [${t.section}] ${t.tip}`).join('\n')}
                 <button
                   type="button"
                   onClick={() => setActiveTab('skills')}
-                  className="w-full py-2 bg-slate-700/80 hover:bg-slate-700 rounded-lg text-xs font-bold text-slate-300 transition-colors flex items-center justify-center gap-1"
+                  className="w-full py-2 bg-slate-700/80 hover:bg-slate-700 rounded-lg text-xs font-bold text-slate-300 transition-colors flex items-center justify-center gap-1 cursor-pointer"
                 >
                   <span>Explore Skill Radar</span>
                   <ChevronRight className="w-3.5 h-3.5" />
