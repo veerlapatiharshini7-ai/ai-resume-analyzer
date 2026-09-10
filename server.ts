@@ -149,6 +149,47 @@ app.get(['/api/health', '/health'], (_req, res) => {
   });
 });
 
+// Firebase config provider endpoint (safely exposes public web config from process.env / .env)
+app.get(['/api/firebase-config', '/firebase-config'], (_req, res) => {
+  const getEnv = (key: string) => {
+    return (
+      process.env[`VITE_FIREBASE_${key}`]?.trim().replace(/^["']|["']$/g, '') ||
+      process.env[`FIREBASE_${key}`]?.trim().replace(/^["']|["']$/g, '') ||
+      ''
+    );
+  };
+
+  const apiKey = getEnv('API_KEY');
+  const projectId = getEnv('PROJECT_ID');
+  const authDomain = getEnv('AUTH_DOMAIN') || (projectId ? `${projectId}.firebaseapp.com` : '');
+  const storageBucket = getEnv('STORAGE_BUCKET') || (projectId ? `${projectId}.firebasestorage.app` : '');
+  const messagingSenderId = getEnv('MESSAGING_SENDER_ID');
+  const appId = getEnv('APP_ID');
+  const measurementId = getEnv('MEASUREMENT_ID');
+
+  const isConfigured =
+    apiKey.length > 0 &&
+    apiKey !== 'your_firebase_api_key_here' &&
+    apiKey !== 'MY_FIREBASE_API_KEY' &&
+    projectId.length > 0 &&
+    projectId !== 'your_project_id';
+
+  res.json({
+    isConfigured,
+    config: isConfigured
+      ? {
+          apiKey,
+          authDomain,
+          projectId,
+          storageBucket,
+          messagingSenderId,
+          appId,
+          measurementId,
+        }
+      : null,
+  });
+});
+
 // Resume analysis API route (supporting aliases for robust communication)
 app.post(['/api/analyze-resume', '/api/analyze', '/analyze'], async (req, res) => {
   const { resumeText, targetRole = 'General Tech & Professional Role', jobDescription = '' } = req.body;

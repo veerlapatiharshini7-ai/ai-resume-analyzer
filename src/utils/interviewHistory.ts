@@ -75,6 +75,12 @@ function safeSetStorage(records: HistoricalInterviewRecord[]): boolean {
   }
 }
 
+import {
+  saveInterviewSessionToFirestore,
+  deleteInterviewSessionFromFirestore,
+  clearAllInterviewSessionsFromFirestore,
+} from '../services/interviewDb';
+
 /**
  * Saves a completed interview session along with its evaluations and final summary.
  */
@@ -99,8 +105,8 @@ export function saveCompletedInterview(
     duration: session.config.duration,
     overallScore: finalSummary.overallScore,
     overallRating: finalSummary.overallRating,
-    isTimedOut: session.isTimedOut,
-    candidateName: candidateName || session.config.resumeReference?.candidateName,
+    isTimedOut: !!session.isTimedOut,
+    candidateName: candidateName || session.config.resumeReference?.candidateName || 'Candidate',
     keyStrengths: finalSummary.keyStrengths || [],
     areasForImprovement: finalSummary.areasForImprovement || [],
     perQuestionScores: finalSummary.questionSummaries || [],
@@ -114,6 +120,12 @@ export function saveCompletedInterview(
   const updated = [record, ...filtered];
 
   safeSetStorage(updated);
+
+  // Asynchronously persist to Cloud Firestore database
+  saveInterviewSessionToFirestore(record).catch((err) => {
+    console.error('[Firestore] Failed background save for interview session:', err);
+  });
+
   return record;
 }
 
@@ -143,7 +155,14 @@ export function getInterviewRecordById(id: string): HistoricalInterviewRecord | 
 export function deleteInterviewRecord(id: string): boolean {
   const records = safeGetStorage();
   const filtered = records.filter((r) => r.id !== id);
-  return safeSetStorage(filtered);
+  const success = safeSetStorage(filtered);
+
+  // Asynchronously delete from Cloud Firestore database
+  deleteInterviewSessionFromFirestore(id).catch((err) => {
+    console.error('[Firestore] Failed background delete for interview session:', err);
+  });
+
+  return success;
 }
 
 /**
@@ -156,6 +175,12 @@ export function clearAllInterviewHistory(): boolean {
   try {
     window.localStorage.removeItem(STORAGE_KEY);
     window.dispatchEvent(new CustomEvent('interview-history-updated', { detail: { count: 0 } }));
+
+    // Asynchronously clear all from Cloud Firestore database
+    clearAllInterviewSessionsFromFirestore().catch((err) => {
+      console.error('[Firestore] Failed background clear for interview sessions:', err);
+    });
+
     return true;
   } catch (err) {
     console.error('Failed to clear interview history:', err);

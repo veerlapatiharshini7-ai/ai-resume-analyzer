@@ -39,6 +39,8 @@ import {
   computeProgressStats,
 } from '../../utils/interviewHistory';
 
+import { subscribeInterviewSessions } from '../../services/interviewDb';
+
 interface InterviewHistoryViewProps {
   onOpenSession: (record: HistoricalInterviewRecord) => void;
   onStartNewInterview: () => void;
@@ -58,15 +60,20 @@ export const InterviewHistoryView: React.FC<InterviewHistoryViewProps> = ({
   const [sessionToDelete, setSessionToDelete] = useState<HistoricalInterviewRecord | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState<boolean>(false);
 
-  // Load history from localStorage
-  const loadHistory = () => {
-    const records = getInterviewHistory();
-    setHistory(records);
-    setStats(computeProgressStats(records));
+  // Load history from cache & Firestore
+  const loadHistory = (records?: HistoricalInterviewRecord[]) => {
+    const list = records || getInterviewHistory();
+    setHistory(list);
+    setStats(computeProgressStats(list));
   };
 
   useEffect(() => {
     loadHistory();
+
+    // Subscribe to live Cloud Firestore updates
+    const unsubscribeFirestore = subscribeInterviewSessions((records) => {
+      loadHistory(records);
+    });
 
     const handleStorageUpdate = () => {
       loadHistory();
@@ -74,6 +81,7 @@ export const InterviewHistoryView: React.FC<InterviewHistoryViewProps> = ({
 
     window.addEventListener('interview-history-updated', handleStorageUpdate);
     return () => {
+      unsubscribeFirestore();
       window.removeEventListener('interview-history-updated', handleStorageUpdate);
     };
   }, []);

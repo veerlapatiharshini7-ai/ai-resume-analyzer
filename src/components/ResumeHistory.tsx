@@ -1,17 +1,19 @@
 import React from 'react';
 import { ResumeHistoryItem } from '../types';
-import { Clock, FileText, ArrowRight, Award, Trash2 } from 'lucide-react';
+import { Clock, FileText, ArrowRight, Trash2, X } from 'lucide-react';
 
 interface ResumeHistoryProps {
   history: ResumeHistoryItem[];
   onViewAnalysis: (item: ResumeHistoryItem) => void;
   onClearHistory?: () => void;
+  onDeleteItem?: (id: string) => void;
 }
 
 export const ResumeHistory: React.FC<ResumeHistoryProps> = ({
   history,
   onViewAnalysis,
   onClearHistory,
+  onDeleteItem,
 }) => {
   if (!history || history.length === 0) {
     return null;
@@ -65,7 +67,7 @@ export const ResumeHistory: React.FC<ResumeHistoryProps> = ({
             <div
               key={item.id}
               onClick={() => onViewAnalysis(item)}
-              className="group p-4 rounded-xl border border-slate-200/80 dark:border-slate-700 hover:border-blue-500 dark:hover:border-blue-500 bg-slate-50/50 dark:bg-slate-900/40 hover:bg-white dark:hover:bg-slate-800/80 transition-all cursor-pointer shadow-xs hover:shadow-md flex flex-col justify-between"
+              className="group relative p-4 rounded-xl border border-slate-200/80 dark:border-slate-700 hover:border-blue-500 dark:hover:border-blue-500 bg-slate-50/50 dark:bg-slate-900/40 hover:bg-white dark:hover:bg-slate-800/80 transition-all cursor-pointer shadow-xs hover:shadow-md flex flex-col justify-between"
             >
               <div className="space-y-2">
                 <div className="flex items-start justify-between gap-2">
@@ -75,13 +77,30 @@ export const ResumeHistory: React.FC<ResumeHistoryProps> = ({
                       {item.fileName}
                     </p>
                   </div>
-                  <span
-                    className={`text-[11px] font-extrabold px-2 py-0.5 rounded-full border shrink-0 ${getScoreBadgeColor(
-                      item.atsScore
-                    )}`}
-                  >
-                    {item.atsScore}/100
-                  </span>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span
+                      className={`text-[11px] font-extrabold px-2 py-0.5 rounded-full border shrink-0 ${getScoreBadgeColor(
+                        item.atsScore
+                      )}`}
+                    >
+                      {item.atsScore}/100
+                    </span>
+
+                    {onDeleteItem && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteItem(item.id);
+                        }}
+                        title="Delete this audit"
+                        className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-opacity p-0.5 rounded-md hover:bg-red-50 dark:hover:bg-red-950/50"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">

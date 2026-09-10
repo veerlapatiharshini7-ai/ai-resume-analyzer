@@ -35,6 +35,13 @@ import {
   saveCompletedInterview,
   getInterviewHistory,
 } from './utils/interviewHistory';
+import {
+  saveResumeAnalysis,
+  subscribeResumeHistory,
+  deleteResumeAnalysis,
+  clearAllResumeAnalyses,
+} from './services/resumeDb';
+import { subscribeInterviewSessions } from './services/interviewDb';
 
 export default function App() {
   const [darkMode, setDarkMode] = useState<boolean>(() => {
@@ -97,13 +104,26 @@ export default function App() {
   const [historyCount, setHistoryCount] = useState<number>(() => getInterviewHistory().length);
   const [returnViewAfterSummary, setReturnViewAfterSummary] = useState<AppView>('analyzer');
 
-  // Listen to history updates across sessions
+  // Listen to Firestore real-time updates and local broadcast updates
   useEffect(() => {
+    // 1. Subscribe to Cloud Firestore Resume History
+    const unsubscribeResumes = subscribeResumeHistory((items) => {
+      setHistory(items);
+    });
+
+    // 2. Subscribe to Cloud Firestore Interview Sessions
+    const unsubscribeInterviews = subscribeInterviewSessions((records) => {
+      setHistoryCount(records.length);
+    });
+
     const handleHistoryUpdate = () => {
       setHistoryCount(getInterviewHistory().length);
     };
     window.addEventListener('interview-history-updated', handleHistoryUpdate);
+
     return () => {
+      unsubscribeResumes();
+      unsubscribeInterviews();
       window.removeEventListener('interview-history-updated', handleHistoryUpdate);
     };
   }, []);
@@ -160,9 +180,9 @@ export default function App() {
       const data: AnalysisResult = await response.json();
       setAnalysisResult(data);
 
-      // Save to Resume History (keep up to 10 latest items)
+      // Save to Cloud Firestore & LocalStorage (real-time stream will sync UI)
       const newItem: ResumeHistoryItem = {
-        id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         fileName:
           fileName?.trim() ||
           (data.candidateName && data.candidateName !== 'Professional Candidate'
@@ -181,15 +201,9 @@ export default function App() {
         result: data,
       };
 
-      setHistory((prev) => {
-        const updated = [newItem, ...prev].slice(0, 10);
-        try {
-          localStorage.setItem('resume_history', JSON.stringify(updated));
-        } catch (e) {
-          console.error('Failed to save resume history to localStorage', e);
-        }
-        return updated;
-      });
+      // Persist to Cloud Firestore
+      await saveResumeAnalysis(newItem);
+
       // Update resume reference with parsed candidate name
       setCurrentResume((prev) =>
         prev
@@ -447,6 +461,8 @@ export default function App() {
               <ResumeHistory
                 history={history}
                 onViewAnalysis={handleViewAnalysis}
+                onClearHistory={() => clearAllResumeAnalyses()}
+                onDeleteItem={(id) => deleteResumeAnalysis(id)}
               />
             )}
           </>
