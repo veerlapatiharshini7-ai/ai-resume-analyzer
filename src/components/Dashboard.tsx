@@ -394,7 +394,9 @@ ${result.improvementTips.map((t) => `• [${t.section}] ${t.tip}`).join('\n')}
                   {result.candidateName}_Resume.pdf
                 </p>
                 <p className="text-xs text-slate-400">
-                  Processed via Gemini 3.6 Flash AI Engine
+                  {result.usedFallback
+                    ? 'Processed via Deterministic ATS Engine'
+                    : 'Processed via Gemini 2.5 Flash AI Engine'}
                 </p>
 
               </div>
@@ -415,7 +417,7 @@ ${result.improvementTips.map((t) => `• [${t.section}] ${t.tip}`).join('\n')}
                   type="button"
                   onClick={handleExportPDF}
                   disabled={isExporting}
-                  className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold tracking-wider uppercase transition-colors shadow-sm flex items-center justify-center gap-2"
+                  className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold tracking-wider uppercase transition-colors shadow-sm flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Download className="w-4 h-4" />
                   <span>{isExporting ? 'Generating...' : 'Download Full PDF'}</span>
@@ -424,7 +426,7 @@ ${result.improvementTips.map((t) => `• [${t.section}] ${t.tip}`).join('\n')}
                 <button
                   type="button"
                   onClick={() => setActiveTab('skills')}
-                  className="w-full py-2 bg-slate-700/80 hover:bg-slate-700 rounded-lg text-xs font-bold text-slate-300 transition-colors flex items-center justify-center gap-1"
+                  className="w-full py-2 bg-slate-700/80 hover:bg-slate-700 rounded-lg text-xs font-bold text-slate-300 transition-colors flex items-center justify-center gap-1 cursor-pointer"
                 >
                   <span>Explore Skill Radar</span>
                   <ChevronRight className="w-3.5 h-3.5" />

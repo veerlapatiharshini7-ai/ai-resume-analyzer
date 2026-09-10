@@ -5,7 +5,18 @@ import { GoogleGenAI, Type } from '@google/genai';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 
+const currentDirname = typeof __dirname !== 'undefined'
+  ? __dirname
+  : (typeof import.meta !== 'undefined' && import.meta?.url ? path.dirname(fileURLToPath(import.meta.url)) : process.cwd());
+
+// Load .env reliably from current working directory and module directory
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+if (path.resolve(currentDirname, '.env') !== path.resolve(process.cwd(), '.env')) {
+  dotenv.config({ path: path.resolve(currentDirname, '.env') });
+}
 dotenv.config();
+// Also load .env.local if present
+dotenv.config({ path: path.resolve(process.cwd(), '.env.local'), override: true });
 
 import {
   computeSectionScores,
@@ -39,11 +50,8 @@ const getDirname = () => {
 };
 const __dirname = getDirname();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -66,20 +74,72 @@ interface CacheEntry {
 const analysisCache = new Map<string, CacheEntry>();
 const MAX_CACHE_SIZE = 200;
 
+// Safe error sanitizer: redacts the actual GEMINI_API_KEY from messages, error objects, and stacks
+function sanitizeError(err: unknown): Record<string, unknown> | string {
+  const rawKey = process.env.GEMINI_API_KEY?.trim().replace(/^["']|["']$/g, '') || '';
+  const redact = (str: string): string => {
+    if (!str) return str;
+    if (rawKey && rawKey.length > 5) {
+      return str.split(rawKey).join('[REDACTED_GEMINI_KEY]');
+    }
+    return str;
+  };
+
+  if (!err) return 'Unknown error';
+
+  if (typeof err === 'object' && err !== null) {
+    const anyErr = err as any;
+    const sanitizedObj: Record<string, unknown> = {
+      name: redact(String(anyErr.name || 'Error')),
+      message: redact(String(anyErr.message || '')),
+      status: anyErr.status || anyErr.statusCode || anyErr.code || undefined,
+    };
+    if (anyErr.errorDetails) {
+      try {
+        sanitizedObj.errorDetails = JSON.parse(redact(JSON.stringify(anyErr.errorDetails)));
+      } catch {
+        sanitizedObj.errorDetails = redact(String(anyErr.errorDetails));
+      }
+    }
+    return sanitizedObj;
+  }
+
+  return redact(String(err));
+}
+
+// Model resolver ensuring valid, active model is used
+function getGeminiModel(): string {
+  const model = process.env.GEMINI_MODEL?.trim().replace(/^["']|["']$/g, '');
+  // Disallow retired models (e.g. gemini-2.5-flash / gemini-1.5-flash) that return 404 NOT_FOUND
+  if (!model || model === 'gemini-2.5-flash' || model === 'gemini-1.5-flash') {
+    return 'gemini-3.6-flash';
+  }
+  return model;
+}
+
 // Initialize Google Gen AI client with required User-Agent
-function getGeminiClient() {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
+function getGeminiClient(): GoogleGenAI | null {
+  const rawKey = process.env.GEMINI_API_KEY;
+  if (!rawKey) {
     return null;
   }
-  return new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
+  const apiKey = rawKey.trim().replace(/^["']|["']$/g, '');
+  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || apiKey === 'your_actual_api_key_here') {
+    return null;
+  }
+  try {
+    return new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
       },
-    },
-  });
+    });
+  } catch (err) {
+    console.error('Failed to initialize GoogleGenAI client:', sanitizeError(err));
+    return null;
+  }
 }
 
 // Helper to clamp any numeric-ish value to an integer in [0,100]
@@ -91,9 +151,13 @@ function clampToInt100(value: unknown): number {
 
 // Health check endpoint
 app.get(['/api/health', '/health'], (_req, res) => {
+  const rawKey = process.env.GEMINI_API_KEY;
+  const apiKey = rawKey ? rawKey.trim().replace(/^["']|["']$/g, '') : '';
+  const hasValidApiKey = !!apiKey && apiKey.length > 0 && apiKey !== 'MY_GEMINI_API_KEY' && apiKey !== 'your_actual_api_key_here';
   res.json({
     status: 'ok',
-    hasApiKey: !!process.env.GEMINI_API_KEY,
+    hasApiKey: hasValidApiKey,
+    model: getGeminiModel(),
     timestamp: new Date().toISOString(),
   });
 });
@@ -270,7 +334,7 @@ app.post(['/api/analyze-resume', '/api/analyze', '/analyze'], async (req, res) =
 - sectionScores (object with formatting: number, keywords: number, experienceImpact: number, skillsMatch: number, readability: number - each 0-100)`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+      model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
       contents: prompt,
       config: {
         temperature: 0,
@@ -566,6 +630,314 @@ app.post(['/api/analyze-resume', '/api/analyze', '/analyze'], async (req, res) =
     return res.json(fallback);
   }
 });
+
+// AI Cover Letter Generator API route
+app.post(['/api/generate-cover-letter', '/api/cover-letter'], async (req, res) => {
+  const {
+    resumeText,
+    targetRole = 'General Professional Role',
+    companyName = '',
+    jobDescription = '',
+    tone = 'Professional',
+  } = req.body;
+
+  if (!resumeText || typeof resumeText !== 'string' || resumeText.trim().length < 30) {
+    return res.status(400).json({
+      error: 'Please provide valid resume text with sufficient content (at least 30 characters).',
+    });
+  }
+
+  if (!targetRole || typeof targetRole !== 'string' || targetRole.trim().length < 2) {
+    return res.status(400).json({
+      error: 'Please provide a valid target job role.',
+    });
+  }
+
+  const validTones = ['Professional', 'Confident', 'Friendly', 'Formal'];
+  const sanitizedTone = validTones.includes(tone) ? tone : 'Professional';
+
+  // Extract candidate name heuristic from resume header
+  const headerLines = resumeText
+    .split('\n')
+    .map((l: string) => l.trim())
+    .filter((l: string) => l.length > 0);
+  const candidateName =
+    headerLines[0] && headerLines[0].length < 60 && !headerLines[0].toLowerCase().includes('resume')
+      ? headerLines[0]
+      : 'Valued Candidate';
+
+  // Generate deterministic cache key
+  const cacheKey = crypto
+    .createHash('sha256')
+    .update(`coverletter:::${resumeText.trim()}:::${targetRole.trim()}:::${(companyName || '').trim()}:::${(jobDescription || '').trim()}:::${sanitizedTone}`)
+    .digest('hex');
+
+  // Return cached result if exact same inputs were provided (only return cached fallback if AI client is unavailable)
+  if (analysisCache.has(cacheKey)) {
+    const cached = analysisCache.get(cacheKey)!.data;
+    const hasAI = !!getGeminiClient();
+    if (!cached?.usedFallback || !hasAI) {
+      console.log('Returning CACHED cover letter for hash:', cacheKey);
+      return res.json({
+        ...cached,
+        generatedAt: new Date().toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+      });
+    }
+  }
+
+  const ai = getGeminiClient();
+
+  if (!ai) {
+    console.warn('GEMINI_API_KEY is missing. Generating fallback cover letter.');
+    const fallback = generateFallbackCoverLetter({
+      resumeText,
+      targetRole,
+      companyName,
+      jobDescription,
+      tone: sanitizedTone,
+      candidateName,
+    });
+
+    if (analysisCache.size >= MAX_CACHE_SIZE) {
+      const oldestKey = analysisCache.keys().next().value;
+      if (oldestKey) analysisCache.delete(oldestKey);
+    }
+    analysisCache.set(cacheKey, { data: fallback, timestamp: Date.now() });
+
+    return res.json(fallback);
+  }
+
+  try {
+    const toneInstructions: Record<string, string> = {
+      Professional: 'Maintain a balanced, articulate, highly competent, and industry-standard tone that emphasizes qualifications and alignment.',
+      Confident: 'Maintain an assertive, bold, high-impact tone that decisively highlights measurable accomplishments, initiative, and conviction.',
+      Friendly: 'Maintain a warm, enthusiastic, engaging, and collaborative tone that conveys genuine passion, cultural fit, and personal excitement.',
+      Formal: 'Maintain an executive, traditional, highly respectful, and polished corporate tone suitable for enterprise or conservative organizations.',
+    };
+
+    const systemInstruction = `You are a Senior Executive Career Strategist and Professional Cover Letter Specialist.
+Your goal is to write a personalized, compelling, and truthful cover letter tailored for the target role "${targetRole}" and target company "${companyName || 'the hiring organization'}".
+
+CRITICAL INSTRUCTIONS & ACCURACY CONSTRAINTS:
+1. TRUTHFULNESS & ZERO FABRICATION (STRICT RULE):
+   - Draw all experiences, achievements, technical skills, projects, and work history EXCLUSIVELY from the provided RESUME CONTENT.
+   - NEVER invent or hallucinate metrics, companies, titles, degrees, or certifications not found in the resume.
+   - If the candidate does not have a skill asked in the job description, do not claim they have it; instead highlight their related strengths and demonstrated learning agility.
+
+2. STRUCTURE:
+   - Salutation: "Dear Hiring Team," or "Dear Hiring Manager at ${companyName || 'the company'},"
+   - Opening Paragraph: State enthusiastic interest in the "${targetRole}" position at ${companyName ? `"${companyName}"` : 'your company'}. Briefly articulate the candidate's core background and value proposition.
+   - Body Paragraphs (2-3 paragraphs):
+     - Highlight 2-3 specific accomplishments, metrics, or technical competencies directly from the resume that directly solve needs mentioned in the Job Description.
+     - Connect past track record to future value for the employer.
+   - Closing Paragraph: Propose a discussion or interview, express gratitude for their consideration, and sign off cleanly.
+   - Sign-off: "Sincerely,\\n${candidateName}"
+
+3. TONE & STYLE:
+   - Apply the selected "${sanitizedTone}" tone: ${toneInstructions[sanitizedTone]}
+   - Keep prose natural, authentic, and human—avoid robotic or clichéd tropes.
+
+4. LENGTH & FORMAT:
+   - Target word count: 300 to 450 words (never exceed 500 words).
+   - Use clean paragraph spacing separated by double newlines (\\n\\n).
+
+5. OUTPUT:
+   - Return ONLY a valid JSON object adhering to the schema.
+`;
+
+    const prompt = `TARGET JOB ROLE: "${targetRole}"
+COMPANY NAME: "${companyName || 'Not specified'}"
+DESIRED TONE: "${sanitizedTone}"
+CANDIDATE NAME: "${candidateName}"
+
+JOB DESCRIPTION:
+---
+${(jobDescription || 'Standard industry requirements for ' + targetRole).slice(0, 12000)}
+---
+
+RESUME CONTENT:
+---
+${resumeText.slice(0, 12000)}
+---
+
+Draft the personalized cover letter adhering strictly to all requirements.`;
+
+    const activeModel = getGeminiModel();
+    console.log(`[COVER LETTER] Requesting generation via Gemini API with model: "${activeModel}"...`);
+
+    const response = await ai.models.generateContent({
+      model: activeModel,
+      contents: prompt,
+      config: {
+        temperature: 0.2,
+        systemInstruction,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            coverLetter: { type: Type.STRING },
+          },
+          required: ['coverLetter'],
+        },
+      },
+    });
+
+    let jsonText = (response.text || '').trim();
+    if (jsonText.startsWith('```')) {
+      jsonText = jsonText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    }
+    const parsed = JSON.parse(jsonText);
+    const coverLetterText = (parsed.coverLetter || '').trim();
+    const wordCount = coverLetterText.split(/\s+/).filter(Boolean).length;
+
+    const result = {
+      coverLetter: coverLetterText,
+      candidateName,
+      targetRole,
+      companyName: companyName || undefined,
+      tone: sanitizedTone,
+      wordCount,
+      usedFallback: false,
+      generatedAt: new Date().toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+    };
+
+    // Store in cache
+    if (analysisCache.size >= MAX_CACHE_SIZE) {
+      const oldestKey = analysisCache.keys().next().value;
+      if (oldestKey) analysisCache.delete(oldestKey);
+    }
+    analysisCache.set(cacheKey, { data: result, timestamp: Date.now() });
+
+    console.log('COVER LETTER GENERATED (gemini):', {
+      candidateName,
+      targetRole,
+      tone: sanitizedTone,
+      wordCount,
+      usedFallback: false,
+      model: activeModel,
+    });
+
+    return res.json(result);
+  } catch (err) {
+    console.error('[GEMINI FAILURE - COVER LETTER] Actual API Error (Sanitized):', JSON.stringify(sanitizeError(err), null, 2));
+    try {
+      const fallback = generateFallbackCoverLetter({
+        resumeText,
+        targetRole,
+        companyName,
+        jobDescription,
+        tone: sanitizedTone,
+        candidateName,
+      });
+
+      // Do not cache temporary API failure fallbacks so subsequent attempts can succeed with Gemini
+      analysisCache.delete(cacheKey);
+
+      return res.json(fallback);
+    } catch (fallbackErr) {
+      console.error('[COVER LETTER FALLBACK FAILURE]:', sanitizeError(fallbackErr));
+      return res.status(500).json({
+        error: 'Failed to generate cover letter. Please verify your resume input.',
+      });
+    }
+  }
+});
+
+// Fallback generator for Cover Letters
+function generateFallbackCoverLetter(params: {
+  resumeText: string;
+  targetRole: string;
+  companyName?: string;
+  jobDescription?: string;
+  tone?: string;
+  candidateName: string;
+}) {
+  const { resumeText, targetRole, companyName, jobDescription, tone = 'Professional', candidateName } = params;
+  const profile = getRoleProfile(targetRole);
+  const { skillsFound } = extractCandidateSkillsCategorized(resumeText, targetRole, jobDescription);
+  const flatSkills = skillsFound.flatMap((c) => c.skills);
+  const topSkills = flatSkills.length > 0 ? flatSkills.slice(0, 4).join(', ') : profile.requiredSkills.slice(0, 4).join(', ');
+
+  // Extract real experience lines from resume with action verbs
+  const rawLines = resumeText
+    .split('\n')
+    .map((l) => l.trim().replace(/^[-*•\s]+/, ''))
+    .filter((l) => l.length > 30 && l.length < 220);
+
+  const experienceBullets = rawLines.filter((l) =>
+    /^(Led|Built|Developed|Engineered|Created|Managed|Designed|Optimized|Architected|Delivered|Implemented|Spearheaded)\b/i.test(l)
+  );
+
+  const highlight1 =
+    experienceBullets[0] ||
+    `Engineered end-to-end solutions utilizing ${topSkills}, improving system throughput and delivery speed.`;
+  const highlight2 =
+    experienceBullets[1] ||
+    `Collaborated cross-functionally to design scalable architecture and maintain high code quality standards.`;
+
+  const company = companyName ? companyName : 'your organization';
+  const greeting = companyName ? `Dear Hiring Team at ${companyName},` : 'Dear Hiring Manager,';
+
+  let opening = '';
+  if (tone === 'Confident') {
+    opening = `I am writing to express my enthusiastic interest in the ${targetRole} position at ${company}. With a proven track record of engineering impact and strong technical proficiency in ${topSkills}, I am prepared to deliver immediate, measurable value to your team's key initiatives.`;
+  } else if (tone === 'Friendly') {
+    opening = `I was delighted to discover the ${targetRole} opportunity at ${company}. Having spent my career working with technologies like ${topSkills}, I would love the chance to bring my enthusiasm, collaborative spirit, and technical skills to your team.`;
+  } else if (tone === 'Formal') {
+    opening = `Please accept this letter and accompanying credentials as my formal application for the position of ${targetRole} at ${company}. My background in software engineering and extensive experience with ${topSkills} align closely with the qualifications you are seeking.`;
+  } else {
+    // Professional
+    opening = `I am writing to submit my application for the ${targetRole} role at ${company}. With a solid technical foundation in ${topSkills} and hands-on experience solving complex operational challenges, I am excited about the opportunity to contribute to your engineering goals.`;
+  }
+
+  const body1 = `Throughout my professional journey, I have prioritized architecting reliable systems that align closely with stakeholder needs. Specifically, ${highlight1.replace(/[.]+$/, '')}. This work strengthened my focus on technical rigor, system scalability, and test-driven development.`;
+
+  const body2 = `In addition, ${highlight2.replace(/[.]+$/, '')}. By combining strong technical fundamentals with proactive communication, I consistently help teams ship features on schedule while maintaining production stability.`;
+
+  let closing = '';
+  if (tone === 'Confident') {
+    closing = `I look forward to discussing how my experience and drive will directly accelerate ${company}'s milestones. Thank you for your time and consideration, and I welcome the opportunity for an interview.`;
+  } else if (tone === 'Friendly') {
+    closing = `I would welcome the opportunity to connect and discuss how my skills and background can support the impactful work happening at ${company}. Thank you so much for your time and review!`;
+  } else if (tone === 'Formal') {
+    closing = `I would welcome the opportunity to discuss my qualifications with you in greater detail. Thank you for your time, consideration, and evaluation of my application.`;
+  } else {
+    closing = `I would welcome the opportunity to speak with you further regarding how my background and skill set align with the needs of ${company}. Thank you for your time and consideration, and I look forward to hearing from you.`;
+  }
+
+  const letter = `${greeting}\n\n${opening}\n\n${body1}\n\n${body2}\n\n${closing}\n\nSincerely,\n${candidateName}`;
+  const wordCount = letter.split(/\s+/).filter(Boolean).length;
+
+  return {
+    coverLetter: letter,
+    candidateName,
+    targetRole,
+    companyName: companyName || undefined,
+    tone,
+    wordCount,
+    usedFallback: true,
+    fallbackReason: 'GEMINI_API_KEY unconfigured or request fallback',
+    generatedAt: new Date().toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }),
+  };
+}
 
 // Fallback generator if API key is unconfigured or rate limited
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1077,7 +1449,9 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server listening on http://0.0.0.0:${PORT}`);
+    console.log(`Backend server ready at:`);
+    console.log(`  - Local:   http://localhost:${PORT}`);
+    console.log(`  - Network: http://127.0.0.1:${PORT}`);
   });
 }
 
