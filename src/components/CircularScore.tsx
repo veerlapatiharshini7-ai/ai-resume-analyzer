@@ -4,25 +4,31 @@ interface CircularScoreProps {
   score: number;
   category: string;
   size?: number;
+  label?: string;
 }
 
 export const CircularScore: React.FC<CircularScoreProps> = ({
   score,
   category,
   size = 180,
+  label = '/ 100 ATS Score',
 }) => {
+  // Normalize and clamp score safely between 0 and 100
+  const rawNum = typeof score === 'number' ? score : Number(score);
+  const safeScore = isNaN(rawNum) || !isFinite(rawNum) ? 0 : Math.max(0, Math.min(100, Math.round(rawNum)));
+
   const [animatedScore, setAnimatedScore] = useState(0);
 
   useEffect(() => {
     const duration = 1200;
     const steps = 40;
-    const increment = score / steps;
+    const increment = safeScore / steps;
     let current = 0;
 
     const timer = setInterval(() => {
       current += increment;
-      if (current >= score) {
-        setAnimatedScore(score);
+      if (current >= safeScore) {
+        setAnimatedScore(safeScore);
         clearInterval(timer);
       } else {
         setAnimatedScore(Math.round(current));
@@ -30,25 +36,34 @@ export const CircularScore: React.FC<CircularScoreProps> = ({
     }, duration / steps);
 
     return () => clearInterval(timer);
-  }, [score]);
+  }, [safeScore]);
 
   // Determine gauge color based on score
   const getColor = (s: number) => {
-    if (s >= 85) return { stroke: '#10b981', bg: 'bg-emerald-500', text: 'text-emerald-600 dark:text-emerald-400', badge: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300' };
-    if (s >= 70) return { stroke: '#2563eb', bg: 'bg-blue-600', text: 'text-blue-600 dark:text-blue-400', badge: 'bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300' };
-    if (s >= 50) return { stroke: '#f59e0b', bg: 'bg-amber-500', text: 'text-amber-600 dark:text-amber-400', badge: 'bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300' };
+    if (s >= 80) return { stroke: '#10b981', bg: 'bg-emerald-500', text: 'text-emerald-600 dark:text-emerald-400', badge: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300' };
+    if (s >= 60) return { stroke: '#2563eb', bg: 'bg-blue-600', text: 'text-blue-600 dark:text-blue-400', badge: 'bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300' };
+    if (s >= 40) return { stroke: '#f59e0b', bg: 'bg-amber-500', text: 'text-amber-600 dark:text-amber-400', badge: 'bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300' };
     return { stroke: '#ef4444', bg: 'bg-red-500', text: 'text-red-600 dark:text-red-400', badge: 'bg-red-100 text-red-800 dark:bg-red-950/80 dark:text-red-300' };
   };
 
-  const theme = getColor(score);
+  const theme = getColor(safeScore);
 
   const strokeWidth = 14;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference - (animatedScore / 100) * circumference;
 
+  const accessibleText = `${category} score: ${safeScore} out of 100`;
+
   return (
-    <div className="flex flex-col items-center justify-center p-2">
+    <div
+      role="progressbar"
+      aria-valuenow={safeScore}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-label={accessibleText}
+      className="flex flex-col items-center justify-center p-2"
+    >
       <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
         <svg width={size} height={size} className="transform -rotate-90">
           {/* Background circle track */}
@@ -82,7 +97,7 @@ export const CircularScore: React.FC<CircularScoreProps> = ({
             {animatedScore}
           </span>
           <span className="text-[10px] font-bold tracking-widest text-slate-400 uppercase">
-            / 100 ATS Score
+            {label}
           </span>
         </div>
       </div>
