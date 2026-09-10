@@ -24,15 +24,22 @@ import {
   FileCheck2,
   ArrowRight,
   ChevronRight,
+  Bot,
 } from 'lucide-react';
 
 interface DashboardProps {
   result: AnalysisResult;
   onReset: () => void;
   onWriteCoverLetter?: () => void;
+  onStartInterview?: () => void;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ result, onReset, onWriteCoverLetter }) => {
+export const Dashboard: React.FC<DashboardProps> = ({
+  result,
+  onReset,
+  onWriteCoverLetter,
+  onStartInterview,
+}) => {
   const [activeTab, setActiveTab] = useState<'bento' | 'skills' | 'grammar' | 'roadmap' | 'jobs'>('bento');
   const [isExporting, setIsExporting] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -125,6 +132,18 @@ ${result.improvementTips.map((t) => `• [${t.section}] ${t.tip}`).join('\n')}
             )}
             <span>{isExporting ? 'Exporting...' : 'Download PDF'}</span>
           </button>
+
+          {onStartInterview && (
+            <button
+              type="button"
+              id="dashboard-start-interview-btn"
+              onClick={onStartInterview}
+              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white shadow-sm transition-all active:scale-[0.98]"
+            >
+              <Bot className="w-4 h-4" />
+              <span>Mock Interview</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -379,6 +398,7 @@ ${result.improvementTips.map((t) => `• [${t.section}] ${t.tip}`).join('\n')}
                     ? 'Processed via Deterministic ATS Engine'
                     : 'Processed via Gemini 2.5 Flash AI Engine'}
                 </p>
+
               </div>
 
               <div className="space-y-2">

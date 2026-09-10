@@ -26,6 +26,29 @@ import {
   analyzeGrammarAndPhrasing,
   ROLE_TAXONOMY,
 } from './scoringEngine';
+import {
+  parseResumeEntities,
+  generateFallbackInterviewQuestions,
+  validateAndSanitizeQuestions,
+} from './questionEngine';
+import {
+  evaluateInterviewAnswersWithGemini,
+  generateFallbackInterviewAnswerEvaluation,
+  sanitizeEvaluation,
+} from './evaluationEngine';
+
+
+const getDirname = () => {
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta.url) {
+      return path.dirname(fileURLToPath(import.meta.url));
+    }
+  } catch (e) {
+    // fallback
+  }
+  return process.cwd();
+};
+const __dirname = getDirname();
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
@@ -423,28 +446,129 @@ app.post(['/api/analyze-resume', '/api/analyze', '/analyze'], async (req, res) =
     const result = JSON.parse(jsonText);
 
     // Apply authoritative deterministic rule-based outputs
+    const profile = getRoleProfile(targetRole);
     result.sectionScores = deterministicScores;
     result.atsScore = calculatedATS;
     result.atsCategory = atsCategory;
     result.candidateName = extractedCandidateName || result.candidateName || 'Professional Candidate';
     result.skillsFound = detSkillsFound;
     result.missingSkills = detMissingSkills;
-    result.grammarSuggestions = detGrammarSuggestions;
     result.usedFallback = false;
 
-    // Deterministic deduplication and priority sorting for improvement tips
-    if (Array.isArray(result.improvementTips)) {
+    // 1. Guarantee valid candidate executive summary
+    const defaultExecutiveSummary = `The resume demonstrates a ${atsCategory === 'Excellent' ? 'highly aligned' : atsCategory === 'Good' ? 'solid' : 'developing'} profile for ${profile.title}. Key demonstrated proficiencies include ${flatSkillsFound.slice(0, 4).join(', ') || 'essential technical capabilities'}, with strategic opportunities to further elevate keyword density and quantifiable achievements.`;
+    if (!result.summary || typeof result.summary !== 'string' || result.summary.trim().length < 15) {
+      result.summary = defaultExecutiveSummary;
+    } else {
+      result.summary = result.summary.trim();
+    }
+
+    // 2. Guarantee valid grammar suggestions
+    const validGeminiGrammar = Array.isArray(result.grammarSuggestions)
+      ? result.grammarSuggestions.filter((g: any) => g && typeof g.originalText === 'string' && typeof g.suggestion === 'string' && g.originalText.trim().length > 0)
+      : [];
+    if (validGeminiGrammar.length >= 2) {
+      result.grammarSuggestions = validGeminiGrammar.slice(0, 3).map((g: any) => ({
+        originalText: g.originalText.trim(),
+        suggestion: g.suggestion.trim(),
+        reason: g.reason || 'Enhance readability and quantifiable impact.',
+      }));
+    } else {
+      result.grammarSuggestions = detGrammarSuggestions;
+    }
+
+    // 3. Guarantee valid improvement tips
+    if (!Array.isArray(result.improvementTips) || result.improvementTips.length === 0) {
+      result.improvementTips = [
+        {
+          section: 'Work Experience',
+          tip: 'Structure every bullet point using Google’s XYZ Formula: "Accomplished [X] as measured by [Y], by doing [Z]" to clearly emphasize measurable business impact.',
+          impact: 'High',
+        },
+        {
+          section: 'Skills Section',
+          tip: `Group technical skills into distinct categories and ensure core keywords like ${detMissingSkills[0]?.skill || profile.requiredSkills[0]} are prominently highlighted.`,
+          impact: 'Medium',
+        },
+        {
+          section: 'Header & Contact',
+          tip: 'Ensure your LinkedIn and GitHub portfolio links are active, clickable, and formatted cleanly without extraneous URL parameters.',
+          impact: 'Low',
+        },
+      ];
+    } else {
       const seenTips = new Set<string>();
-      result.improvementTips = result.improvementTips.filter((t: any) => {
-        if (!t || !t.tip) return false;
-        const k = (t.section || '') + '::' + t.tip.trim().toLowerCase();
-        if (seenTips.has(k)) return false;
-        seenTips.add(k);
-        return true;
-      });
+      result.improvementTips = result.improvementTips
+        .filter((t: any) => t && typeof t.tip === 'string' && t.tip.trim().length > 0)
+        .map((t: any) => ({
+          section: t.section || 'Work Experience',
+          tip: t.tip.trim(),
+          impact: (['High', 'Medium', 'Low'].includes(t.impact) ? t.impact : 'Medium') as 'High' | 'Medium' | 'Low',
+        }))
+        .filter((t: any) => {
+          const k = t.section + '::' + t.tip.toLowerCase();
+          if (seenTips.has(k)) return false;
+          seenTips.add(k);
+          return true;
+        });
+
+      if (result.improvementTips.length === 0) {
+        result.improvementTips = [
+          {
+            section: 'Work Experience',
+            tip: 'Structure every bullet point using Google’s XYZ Formula: "Accomplished [X] as measured by [Y], by doing [Z]".',
+            impact: 'High',
+          },
+          {
+            section: 'Skills Section',
+            tip: `Group skills into distinct categories and ensure target keywords like ${detMissingSkills[0]?.skill || profile.requiredSkills[0]} are prominently highlighted.`,
+            impact: 'Medium',
+          },
+          {
+            section: 'Header & Contact',
+            tip: 'Ensure your LinkedIn and GitHub URLs are hyperlinked and formatted cleanly without unnecessary parameters.',
+            impact: 'Low',
+          },
+        ];
+      }
       const impactOrder: Record<string, number> = { High: 1, Medium: 2, Low: 3 };
       result.improvementTips.sort((a: any, b: any) => (impactOrder[a.impact] || 4) - (impactOrder[b.impact] || 4));
     }
+
+    // 4. Guarantee valid suitable job roles
+    if (!Array.isArray(result.suitableJobRoles) || result.suitableJobRoles.length === 0) {
+      result.suitableJobRoles = [
+        {
+          title: profile.title,
+          matchPercentage: calculatedATS,
+          keyRequirements: `Core technical mastery in ${profile.requiredSkills.slice(0, 3).join(', ')}, end-to-end workflow execution.`,
+        },
+        ...Object.values(ROLE_TAXONOMY)
+          .filter((r) => r.id !== profile.id)
+          .slice(0, 2)
+          .map((r) => {
+            const otherScores = computeSectionScores({
+              resumeText,
+              targetRole: r.title,
+              jobDescription: '',
+              skillsFound: flatSkillsFound,
+            });
+            const otherAts = calculateFinalATS(otherScores);
+            return {
+              title: r.title,
+              matchPercentage: otherAts,
+              keyRequirements: `Competency in ${r.requiredSkills.slice(0, 3).join(', ')} and domain workflows.`,
+            };
+          }),
+      ];
+    } else {
+      result.suitableJobRoles = result.suitableJobRoles.map((r: any) => ({
+        title: r.title || profile.title,
+        matchPercentage: typeof r.matchPercentage === 'number' ? r.matchPercentage : calculatedATS,
+        keyRequirements: r.keyRequirements || `Proficiency in ${profile.requiredSkills.slice(0, 3).join(', ')}.`,
+      }));
+    }
+    result.suitableJobRoles.sort((a: any, b: any) => (b.matchPercentage || 0) - (a.matchPercentage || 0));
 
     // Deterministic deduplication for strengths & weaknesses
     if (Array.isArray(result.strengths)) {
@@ -455,17 +579,11 @@ app.post(['/api/analyze-resume', '/api/analyze', '/analyze'], async (req, res) =
     }
 
     // Ensure certifications & projects are populated
-    const profile = getRoleProfile(targetRole);
     if (!Array.isArray(result.recommendedCertifications) || result.recommendedCertifications.length === 0) {
       result.recommendedCertifications = profile.certifications;
     }
     if (!Array.isArray(result.recommendedProjects) || result.recommendedProjects.length === 0) {
       result.recommendedProjects = profile.projects;
-    }
-
-    // Deterministic sorting for suitable job roles
-    if (Array.isArray(result.suitableJobRoles)) {
-      result.suitableJobRoles.sort((a: any, b: any) => (b.matchPercentage || 0) - (a.matchPercentage || 0));
     }
 
     result.analyzedAt = new Date().toLocaleDateString('en-US', {
@@ -929,7 +1047,7 @@ function generateFallbackAnalysis(text: string, targetRole: string, jobDescripti
     improvementTips: [
       {
         section: 'Work Experience',
-        tip: 'Structure every bullet point using the XYZ Formula: "Accomplished [X] as measured by [Y], by doing [Z]".',
+        tip: 'Structure every bullet point using Google’s XYZ Formula: "Accomplished [X] as measured by [Y], by doing [Z]" to emphasize measurable impact.',
         impact: 'High',
       },
       {
@@ -956,6 +1074,362 @@ function generateFallbackAnalysis(text: string, targetRole: string, jobDescripti
     }),
   };
 }
+
+
+// ==========================================
+// FEATURE 2: AI INTERVIEW QUESTION GENERATION
+// ==========================================
+
+// In-memory cache for interview questions
+const questionCache = new Map<string, { data: any; timestamp: number }>();
+
+app.post(['/api/generate-interview-questions', '/api/generate-questions'], async (req, res) => {
+  const { interviewConfig, resumeText = '', candidateName = '' } = req.body;
+
+  if (!interviewConfig || !interviewConfig.targetRole) {
+    return res.status(400).json({
+      error: 'Invalid interview configuration. Please provide a valid targetRole, level, type, and questionCount.',
+    });
+  }
+
+  const {
+    targetRole,
+    interviewLevel = 'Beginner',
+    interviewType = 'Mixed',
+    questionCount = 10,
+  } = interviewConfig;
+
+  const count = Number(questionCount) || 10;
+
+  // Extract structured resume entities
+  const entities = parseResumeEntities(resumeText, targetRole);
+  if (candidateName && candidateName.trim()) {
+    entities.candidateName = candidateName.trim();
+  }
+
+  // Generate deterministic cache key based on configuration and resume
+  const cacheKey = crypto
+    .createHash('sha256')
+    .update(`${targetRole}:::${interviewLevel}:::${interviewType}:::${count}:::${resumeText.slice(0, 4000)}`)
+    .digest('hex');
+
+  if (questionCache.has(cacheKey)) {
+    const cached = questionCache.get(cacheKey)!.data;
+    console.log('Returning CACHED interview questions for hash:', cacheKey);
+    return res.json({
+      questions: cached,
+      config: interviewConfig,
+      generatedAt: new Date().toISOString(),
+    });
+  }
+
+  try {
+    const ai = getGeminiClient();
+    let finalQuestions = [];
+
+    if (ai) {
+      try {
+        console.log(`Generating ${count} ${interviewLevel} ${interviewType} questions for ${targetRole} with Gemini AI...`);
+        const geminiQuestions = await generateQuestionsWithGemini(
+          { targetRole, interviewLevel, interviewType, questionCount: count },
+          resumeText,
+          entities,
+          ai
+        );
+        finalQuestions = validateAndSanitizeQuestions(geminiQuestions, entities, interviewConfig);
+      } catch (geminiError) {
+        console.warn('Gemini question generation error, using intelligent resume-tailored question generator:', geminiError);
+        finalQuestions = generateFallbackInterviewQuestions(interviewConfig, resumeText, entities.candidateName);
+      }
+    } else {
+      console.log('Gemini API key not configured. Using intelligent resume-tailored question generator.');
+      finalQuestions = generateFallbackInterviewQuestions(interviewConfig, resumeText, entities.candidateName);
+    }
+
+    // Ensure final array is exactly count
+    finalQuestions = finalQuestions.slice(0, count);
+    questionCache.set(cacheKey, { data: finalQuestions, timestamp: Date.now() });
+
+    return res.json({
+      questions: finalQuestions,
+      config: interviewConfig,
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (err: unknown) {
+    console.error('Error generating interview questions:', err);
+    const fallback = generateFallbackInterviewQuestions(interviewConfig, resumeText, candidateName);
+    return res.json({
+      questions: fallback.slice(0, count),
+      config: interviewConfig,
+      generatedAt: new Date().toISOString(),
+    });
+  }
+});
+
+// Gemini question generator helper
+async function generateQuestionsWithGemini(
+  config: { targetRole: string; interviewLevel: string; interviewType: string; questionCount: number },
+  resumeText: string,
+  entities: ReturnType<typeof parseResumeEntities>,
+  ai: GoogleGenAI
+) {
+  const count = config.questionCount || 10;
+  const role = config.targetRole;
+  const level = config.interviewLevel;
+  const type = config.interviewType;
+
+  const projectSummary = entities.projects.length > 0
+    ? entities.projects.map((p) => `- Project Name: "${p.name}" (Technologies: ${p.technologies.join(', ') || 'General'}). Description: ${p.description || 'N/A'}`).join('\n')
+    : 'No explicit projects listed. Ask about work experience or general technical concepts.';
+
+  const experienceSummary = entities.experiences.length > 0
+    ? entities.experiences.map((e) => `- Role: "${e.role}" at "${e.company}". Highlights: ${e.achievements.slice(0, 2).join('; ')}`).join('\n')
+    : 'No explicit employment history listed.';
+
+  const detectedSkillsSummary = entities.skills.length > 0
+    ? entities.skills.map((s) => `${s.skill} (${s.domain})`).join(', ')
+    : 'General technical tools';
+
+  const systemInstruction = `You are a Principal Technical Interviewer and Senior Engineering Hiring Manager conducting a high-fidelity mock interview.
+Your mission is to generate EXACTLY ${count} questions for a ${level}-level candidate applying for "${role}".
+The interview type is "${type}".
+
+CRITICAL RESUME-GROUNDING & TECHNICAL ACCURACY RULES:
+1. NEVER assume a technology is related to an engineering concept unless the technology actually supports that concept:
+   - HTML5 RULE: When generating HTML5 questions, do NOT mention CSS-only concepts such as Flexbox, CSS Grid, CSS properties, CSS selectors, or responsive CSS. HTML5 questions must focus strictly on HTML concepts such as semantic elements (<main>, <article>, <nav>, <header>, <section>), forms & native validation attributes (required, pattern), web accessibility (ARIA roles, WCAG, alt text), multimedia (<picture>, <video>, <audio>), and HTML5 Web APIs (Web Storage, Web Workers, Canvas, History API, preload/prefetch).
+   - CSS3 / TAILWIND RULE: Questions about styling, responsive design (Flexbox, CSS Grid, breakpoints), CSS architecture/maintainability, specificity, and rendering reflow/repaint must name CSS3, Tailwind CSS, or Sass.
+   - REACT / COMPONENT FRAMEWORKS RULE: If asking about state management, component lifecycle, hooks, or virtual DOM, React (or Vue/Angular) MUST actually appear in the resume.
+   - BACKEND FRAMEWORKS RULE: If asking about REST APIs, middleware, or backend routing, a backend framework/runtime (like Node.js, Express, Python, Django, etc.) MUST actually appear in the resume.
+   - DATABASES RULE: If asking about database queries, indexing, or ACID transactions, SQL/PostgreSQL/MySQL/MongoDB MUST appear in the resume.
+   - DEVOPS RULE: If asking about containerization, Docker must appear in the resume.
+2. NO HALLUCINATIONS:
+   - NEVER invent projects, technologies, job experience, or responsibilities that do not exist in the candidate's resume facts.
+   - When personalizing a question around a project, use the ACTUAL project name from the resume facts (e.g., "In your [ACTUAL PROJECT NAME] project, how did you...").
+   - NEVER use vague filler phrases like "when building experience", "the system", "your project", or "in your experience project".
+   - If no project is listed in the resume, ask about their experience at [Company Name] or fundamental questions for the target role.
+3. INTERVIEW TYPE REQUIREMENTS:
+   - "Technical": EXACTLY 100% technical questions. Coding fundamentals, architecture, debugging, database queries, framework internals, APIs, system design. ZERO generic HR questions.
+   - "HR / Behavioral": EXACTLY 100% STAR-method behavioral and situational questions (teamwork, leadership, conflict resolution, learning agility, motivation, handling deadlines).
+   - "Mixed": A balanced blend starting with an introduction/background question, followed by ~60% technical questions grounded in resume projects/skills, and ~35% behavioral/situational questions.
+4. DIFFICULTY LEVEL REQUIREMENTS:
+   - "Beginner": Core concepts, syntax, standard problem solving, simple project overviews, foundational technical principles.
+   - "Intermediate": Real-world implementation, debugging, design decisions, trade-offs, state/data handling, project-level reasoning.
+   - "Advanced": Distributed architecture, scalability, concurrency, fault tolerance, performance optimization, staff-level trade-offs.
+5. QUESTION COUNT & DIVERSITY:
+   - Return an array with EXACTLY ${count} items.
+   - Every question must be distinct, avoiding repetitive phrasing or testing the exact same topic twice.
+
+Return ONLY a valid JSON array of objects with the exact schema:
+[
+  {
+    "id": "q-1",
+    "question": "Question text here",
+    "category": "Technical" | "Behavioral" | "Situational" | "Background",
+    "difficulty": "${level}",
+    "topic": "Concise 2-4 word topic",
+    "expectedFocus": "What the interviewer evaluates in the answer"
+  }
+]`;
+
+  const prompt = `CANDIDATE INFORMATION & VERIFIED RESUME FACTS:
+- Candidate Name: ${entities.candidateName}
+- Target Job Role: ${role}
+- Interview Level: ${level}
+- Interview Type: ${type}
+- Required Question Count: ${count}
+
+DETECTED RESUME PROJECTS:
+${projectSummary}
+
+DETECTED RESUME WORK EXPERIENCE:
+${experienceSummary}
+
+VERIFIED SKILLS IN RESUME:
+${detectedSkillsSummary}
+
+RAW RESUME TEXT:
+---
+${resumeText.slice(0, 8000) || 'General candidate profile.'}
+---
+
+Generate exactly ${count} highly grounded, technically coherent interview questions for this candidate.`;
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3.6-flash',
+    contents: prompt,
+    config: {
+      systemInstruction,
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            id: { type: Type.STRING },
+            question: { type: Type.STRING },
+            category: { type: Type.STRING, enum: ['Technical', 'Behavioral', 'Situational', 'Background'] },
+            difficulty: { type: Type.STRING, enum: ['Beginner', 'Intermediate', 'Advanced'] },
+            topic: { type: Type.STRING },
+            expectedFocus: { type: Type.STRING },
+          },
+          required: ['id', 'question', 'category', 'difficulty', 'topic', 'expectedFocus'],
+        },
+      },
+    },
+  });
+
+  const parsed = JSON.parse(response.text || '[]');
+  if (Array.isArray(parsed) && parsed.length > 0) {
+    return parsed.map((q: any, idx: number) => ({
+      id: q.id || `q-${idx + 1}`,
+      question: q.question,
+      category: q.category || (type === 'HR / Behavioral' ? 'Behavioral' : 'Technical'),
+      difficulty: q.difficulty || level,
+      topic: q.topic || role,
+      expectedFocus: q.expectedFocus || 'Demonstrating depth of knowledge and clear communication.',
+    }));
+  }
+
+  throw new Error('Gemini returned an empty array of questions.');
+}
+
+// ==========================================
+// FEATURE 4: AI ANSWER EVALUATION API
+// ==========================================
+
+const evaluationCache = new Map<string, { data: any; timestamp: number }>();
+
+app.post(['/api/evaluate-interview-answers', '/api/evaluate-answers'], async (req, res) => {
+  const {
+    config,
+    interviewConfig,
+    questions,
+    responses = [],
+    resumeText = '',
+    candidateName = '',
+    sessionId,
+  } = req.body;
+
+  const activeConfig = config || interviewConfig;
+
+  if (!activeConfig || !activeConfig.targetRole) {
+    return res.status(400).json({
+      error: 'Invalid interview configuration. targetRole is required.',
+    });
+  }
+
+  if (!questions || !Array.isArray(questions) || questions.length === 0) {
+    return res.status(400).json({
+      error: 'No interview questions provided for evaluation.',
+    });
+  }
+
+  // Generate deterministic cache key based on questions and responses
+  const answersPayload = (responses as any[])
+    .map((r) => `${r.questionId || r.questionNumber}:${(r.answer || '').trim()}`)
+    .join('|||');
+  const cacheKey = crypto
+    .createHash('sha256')
+    .update(`${activeConfig.targetRole}:::${activeConfig.interviewLevel}:::${answersPayload}`)
+    .digest('hex');
+
+  if (evaluationCache.has(cacheKey)) {
+    const cached = evaluationCache.get(cacheKey)!.data;
+    console.log('Returning CACHED interview answer evaluations for hash:', cacheKey);
+    return res.json({
+      sessionId: sessionId || `session-${Date.now()}`,
+      config: activeConfig,
+      evaluations: cached,
+      evaluatedAt: new Date().toISOString(),
+    });
+  }
+
+  try {
+    const ai = getGeminiClient();
+    let evaluations = [];
+    let usedFallback = false;
+
+    if (ai) {
+      try {
+        console.log(`Evaluating ${questions.length} interview responses with Gemini AI...`);
+        evaluations = await evaluateInterviewAnswersWithGemini(
+          activeConfig,
+          questions,
+          responses,
+          resumeText,
+          candidateName,
+          ai
+        );
+      } catch (geminiError) {
+        console.warn('Gemini evaluation error, using intelligent fallback evaluator:', geminiError);
+        usedFallback = true;
+        evaluations = questions.map((q: any, idx: number) => {
+          const resp =
+            responses.find((r: any) => r.questionId === q.id || r.questionNumber === idx + 1) || {
+              questionId: q.id,
+              questionNumber: idx + 1,
+              question: q.question,
+              answer: '',
+              submittedAt: new Date().toISOString(),
+            };
+          return generateFallbackInterviewAnswerEvaluation(q, resp, activeConfig, idx, resumeText);
+        });
+      }
+    } else {
+      console.log('Gemini API key not configured. Using intelligent fallback answer evaluator.');
+      usedFallback = true;
+      evaluations = questions.map((q: any, idx: number) => {
+        const resp =
+          responses.find((r: any) => r.questionId === q.id || r.questionNumber === idx + 1) || {
+            questionId: q.id,
+            questionNumber: idx + 1,
+            question: q.question,
+            answer: '',
+            submittedAt: new Date().toISOString(),
+          };
+        return generateFallbackInterviewAnswerEvaluation(q, resp, activeConfig, idx, resumeText);
+      });
+    }
+
+    // Cache the evaluation results
+    if (evaluationCache.size >= 200) {
+      const oldestKey = evaluationCache.keys().next().value;
+      if (oldestKey) evaluationCache.delete(oldestKey);
+    }
+    evaluationCache.set(cacheKey, { data: evaluations, timestamp: Date.now() });
+
+    return res.json({
+      sessionId: sessionId || `session-${Date.now()}`,
+      config: activeConfig,
+      evaluations,
+      evaluatedAt: new Date().toISOString(),
+      usedFallback,
+    });
+  } catch (err: unknown) {
+    console.error('Error evaluating interview answers:', err);
+    // Even in severe unexpected error, fallback safely without failing the request
+    const fallbackEvaluations = questions.map((q: any, idx: number) => {
+      const resp =
+        responses.find((r: any) => r.questionId === q.id || r.questionNumber === idx + 1) || {
+          questionId: q.id,
+          questionNumber: idx + 1,
+          question: q.question,
+          answer: '',
+          submittedAt: new Date().toISOString(),
+        };
+      return generateFallbackInterviewAnswerEvaluation(q, resp, activeConfig, idx, resumeText);
+    });
+
+    return res.json({
+      sessionId: sessionId || `session-${Date.now()}`,
+      config: activeConfig,
+      evaluations: fallbackEvaluations,
+      evaluatedAt: new Date().toISOString(),
+      usedFallback: true,
+    });
+  }
+});
+
 
 // Vite middleware in development or static serving in production
 async function startServer() {
