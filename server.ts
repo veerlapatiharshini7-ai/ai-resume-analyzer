@@ -5,14 +5,14 @@ import { GoogleGenAI, Type } from '@google/genai';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 
-const currentDirname = typeof __dirname !== 'undefined'
-  ? __dirname
-  : (typeof import.meta !== 'undefined' && import.meta?.url ? path.dirname(fileURLToPath(import.meta.url)) : process.cwd());
+const __dirname = typeof import.meta !== 'undefined' && import.meta?.url
+  ? path.dirname(fileURLToPath(import.meta.url))
+  : process.cwd();
 
 // Load .env reliably from current working directory and module directory
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
-if (path.resolve(currentDirname, '.env') !== path.resolve(process.cwd(), '.env')) {
-  dotenv.config({ path: path.resolve(currentDirname, '.env') });
+if (path.resolve(__dirname, '.env') !== path.resolve(process.cwd(), '.env')) {
+  dotenv.config({ path: path.resolve(__dirname, '.env') });
 }
 dotenv.config();
 // Also load .env.local if present
@@ -36,19 +36,6 @@ import {
   generateFallbackInterviewAnswerEvaluation,
   sanitizeEvaluation,
 } from './evaluationEngine';
-
-
-const getDirname = () => {
-  try {
-    if (typeof import.meta !== 'undefined' && import.meta.url) {
-      return path.dirname(fileURLToPath(import.meta.url));
-    }
-  } catch (e) {
-    // fallback
-  }
-  return process.cwd();
-};
-const __dirname = getDirname();
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
