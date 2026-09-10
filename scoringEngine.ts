@@ -720,9 +720,16 @@ export function analyzeGrammarAndPhrasing(
       if (l.length < 20 || l.length > 250) return false;
       // Filter out pure contact, URL, and section header lines
       if (/@|http|linkedin\.com|github\.com|phone|\(\d{3}\)/i.test(l)) return false;
-      if (/^(summary|experience|skills|education|projects|work experience|technical skills)$/i.test(l)) return false;
+      if (/^(summary|professional summary|experience|skills|technical skills|education|projects|work experience|core competencies)$/i.test(l)) return false;
+      // Filter out job header lines with pipe | or dates or locations
+      if (l.includes('|') || /\b(19|20)\d{2}\b/i.test(l)) return false;
+      // Filter out skill lists / skill category colon headers
+      if (/^(languages|programming languages|frameworks|libraries|tools|databases|cloud|bi & visualization|data analysis & stats|product management|business & tech|technical skills):/i.test(l)) return false;
+      if (/^[A-Za-z\s&/]+:\s+[A-Za-z0-9]/i.test(l) && !/^(re-architected|developed|built|engineered|spearheaded|led|managed|designed|created|implemented|optimized|constructed|automated|prioritized|conducted|authored|maintained)/i.test(l)) return false;
       return true;
     });
+
+
 
   const suggestions: GrammarSuggestionResult[] = [];
   const seenOriginals = new Set<string>();
@@ -799,17 +806,17 @@ export function analyzeGrammarAndPhrasing(
   // Rule 4: Action verbs without metrics (Google XYZ formula enhancement)
   if (suggestions.length < 3) {
     for (const line of lines) {
+      if (suggestions.length >= 3) break;
       const clean = line.replace(/^[-*•\s]+/, '').trim();
-      const startsWithAction = /^(?:Led|Built|Created|Designed|Developed|Implemented|Optimized|Launched|Engineered|Architected|Constructed|Automated)\b/i.test(clean);
+      const startsWithAction = /^(?:Led|Built|Created|Designed|Developed|Implemented|Optimized|Launched|Engineered|Architected|Constructed|Automated|Maintained|Authored|Integrated|Constructed|Managed|Prioritized|Conducted)\b/i.test(clean);
       const hasMetrics = /\d+%|\$\d+|\d+x|\b\d{2,}\b|\b\d+\+/i.test(clean);
-      if (startsWithAction && !hasMetrics && clean.length >= 35 && clean.length <= 150) {
+      if (startsWithAction && !hasMetrics && clean.length >= 25 && clean.length <= 180) {
         const withoutPeriod = clean.replace(/[.]+$/, '');
         addSuggestion(
           clean,
-          `${withoutPeriod}, achieving a 25% efficiency gain and accelerating deployment cycles.`,
+          `${withoutPeriod}, achieving a 25% efficiency gain and accelerating sprint velocity.`,
           'Incorporate quantifiable metrics using Google’s X-Y-Z formula: "Accomplished [X] as measured by [Y], by doing [Z]".'
         );
-        break;
       }
     }
   }
@@ -817,6 +824,7 @@ export function analyzeGrammarAndPhrasing(
   // Rule 5: Wordiness / filler phrase reduction
   if (suggestions.length < 3) {
     for (const line of lines) {
+      if (suggestions.length >= 3) break;
       const clean = line.replace(/^[-*•\s]+/, '').trim();
       if (/in order to/i.test(clean)) {
         addSuggestion(
@@ -834,7 +842,32 @@ export function analyzeGrammarAndPhrasing(
     }
   }
 
-  // Fallback: Use real bullet points from work experience / projects
+  // Rule 6: Upgrade general bullet points to executive impact
+  if (suggestions.length < 3) {
+    for (const line of lines) {
+      if (suggestions.length >= 3) break;
+      const clean = line.replace(/^[-*•\s]+/, '').trim();
+      if (clean.length >= 30 && clean.length <= 180 && !seenOriginals.has(clean.toLowerCase())) {
+        const withoutPeriod = clean.replace(/[.]+$/, '');
+        if (/^(Re-architected|Developed|Built|Engineered|Optimized|Maintained|Conducted|Constructed|Authored|Spearheaded|Prioritized|Managed|Integrated|Designed|Launched|Automated)/i.test(clean)) {
+          addSuggestion(
+            clean,
+            `${withoutPeriod}, driving a 25% efficiency gain and accelerating deployment velocity.`,
+            'Incorporate quantifiable metrics using Google’s X-Y-Z formula: "Accomplished [X] as measured by [Y], by doing [Z]".'
+          );
+        } else {
+          addSuggestion(
+            clean,
+            `Spearheaded ${clean.replace(/^[a-z]/, (c) => c.toLowerCase()).replace(/[.]+$/, '')}, driving a 20% improvement in team delivery velocity.`,
+            'Begin bullet points with decisive action verbs and quantify the resulting business outcome.'
+          );
+        }
+      }
+    }
+  }
+
+
+  // Fallback: If still under 3, provide standard high-impact suggestions
   if (suggestions.length === 0 && lines.length > 0) {
     const bulletLine = lines.find((l) => /^[•\-*]/.test(l) || /^(Developed|Built|Engineered|Led|Designed)/i.test(l)) || lines[0];
     const clean = bulletLine.replace(/^[-*•\s]+/, '').trim();
@@ -847,4 +880,5 @@ export function analyzeGrammarAndPhrasing(
 
   return suggestions.slice(0, 3);
 }
+
 

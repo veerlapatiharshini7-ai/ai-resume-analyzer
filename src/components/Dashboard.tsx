@@ -24,14 +24,22 @@ import {
   FileCheck2,
   ArrowRight,
   ChevronRight,
+  Bot,
 } from 'lucide-react';
 
 interface DashboardProps {
   result: AnalysisResult;
   onReset: () => void;
+  onWriteCoverLetter?: () => void;
+  onStartInterview?: () => void;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ result, onReset }) => {
+export const Dashboard: React.FC<DashboardProps> = ({
+  result,
+  onReset,
+  onWriteCoverLetter,
+  onStartInterview,
+}) => {
   const [activeTab, setActiveTab] = useState<'bento' | 'skills' | 'grammar' | 'roadmap' | 'jobs'>('bento');
   const [isExporting, setIsExporting] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -98,6 +106,18 @@ ${result.improvementTips.map((t) => `• [${t.section}] ${t.tip}`).join('\n')}
             <span>{copied ? 'Copied' : 'Copy Summary'}</span>
           </button>
 
+          {onWriteCoverLetter && (
+            <button
+              type="button"
+              id="dashboard-write-cover-letter-btn"
+              onClick={onWriteCoverLetter}
+              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-all active:scale-[0.98] cursor-pointer"
+            >
+              <Wand2 className="w-4 h-4" />
+              <span>Write Cover Letter</span>
+            </button>
+          )}
+
           <button
             type="button"
             id="download-pdf-btn"
@@ -112,6 +132,18 @@ ${result.improvementTips.map((t) => `• [${t.section}] ${t.tip}`).join('\n')}
             )}
             <span>{isExporting ? 'Exporting...' : 'Download PDF'}</span>
           </button>
+
+          {onStartInterview && (
+            <button
+              type="button"
+              id="dashboard-start-interview-btn"
+              onClick={onStartInterview}
+              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white shadow-sm transition-all active:scale-[0.98]"
+            >
+              <Bot className="w-4 h-4" />
+              <span>Mock Interview</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -364,9 +396,21 @@ ${result.improvementTips.map((t) => `• [${t.section}] ${t.tip}`).join('\n')}
                 <p className="text-xs text-slate-400">
                   Processed via Gemini 3.6 Flash AI Engine
                 </p>
+
               </div>
 
               <div className="space-y-2">
+                {onWriteCoverLetter && (
+                  <button
+                    type="button"
+                    onClick={onWriteCoverLetter}
+                    className="w-full py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white rounded-lg text-xs font-bold tracking-wider uppercase transition-colors shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Wand2 className="w-4 h-4" />
+                    <span>Generate Cover Letter</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={handleExportPDF}
